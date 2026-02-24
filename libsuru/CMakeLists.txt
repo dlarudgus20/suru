@@ -1,5 +1,8 @@
 add_library(libsuru STATIC
-    src/compiler.cpp
+    src/parse.cpp
+    src/parser.cpp
+    src/lexer.cpp
+    src/dump.cpp
 )
 
 target_include_directories(libsuru
@@ -7,7 +10,6 @@ target_include_directories(libsuru
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(libsuru PUBLIC libsuru-vm)
 target_compile_features(libsuru PUBLIC cxx_std_23)
 
 if(BUILD_TESTING)

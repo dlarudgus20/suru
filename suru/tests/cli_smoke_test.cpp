@@ -1,10 +1,19 @@
 #include <cstdlib>
+#include <iostream>
+#include <string>
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "missing suru executable path\n";
+        return 1;
+    }
+
 #if defined(_WIN32)
-    const int rc = std::system("suru --help > NUL");
+    const std::string cmd = "\"" + std::string(argv[1]) + "\" --help > NUL";
 #else
-    const int rc = std::system("./suru --help > /dev/null");
+    const std::string cmd = "\"" + std::string(argv[1]) + "\" --help > /dev/null";
 #endif
+
+    const int rc = std::system(cmd.c_str());
     return rc == 0 ? 0 : 1;
 }

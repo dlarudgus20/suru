@@ -5,16 +5,16 @@
 #include <string>
 #include <string_view>
 
-#include "suru/front/compiler.hpp"
-#include "suru/vm/vm.hpp"
+#include "suru/front/dump.hpp"
+#include "suru/front/parse.hpp"
 
 namespace {
 
 void print_help(std::ostream& out) {
     out << "Usage:\n"
-        << "  suru run <file.suru>\n"
-        << "  suru compile <file.suru> -o <out.bc>\n"
-        << "  suru disasm <file.bc>\n";
+        << "  suru            # start REPL\n"
+        << "  suru <file>     # parse file and print syntax tree\n"
+        << "  suru --help\n";
 }
 
 std::string read_text_file(const std::filesystem::path& path, std::string& error) {
@@ -23,12 +23,13 @@ std::string read_text_file(const std::filesystem::path& path, std::string& error
         error = "failed to open file: " + path.string();
         return {};
     }
+
     std::ostringstream buffer;
     buffer << input.rdbuf();
     return buffer.str();
 }
 
-int run_source(const std::filesystem::path& source_path) {
+int parse_source(const std::filesystem::path& source_path) {
     std::string error;
     std::string source = read_text_file(source_path, error);
     if (!error.empty()) {
@@ -36,116 +37,77 @@ int run_source(const std::filesystem::path& source_path) {
         return 1;
     }
 
-    auto compiled = suru::front::compile(source);
-    if (!compiled.ok()) {
-        for (const auto& diag : compiled.diagnostics) {
+    auto parsed = suru::front::parse(source);
+    if (!parsed.ok()) {
+        for (const auto& diag : parsed.diagnostics) {
             std::cerr << source_path.string() << ':' << diag.location.line << ':' << diag.location.column
                       << ": error: " << diag.message << '\n';
         }
         return 1;
     }
 
-    auto exec = suru::vm::execute(compiled.module);
-    if (exec.exit_code != 0) {
-        std::cerr << "runtime error: " << exec.error_message << '\n';
-        return exec.exit_code;
-    }
-
-    if (!exec.final_stack.empty()) {
-        std::cout << "result: " << exec.final_stack.back() << '\n';
-    }
+    std::cout << suru::front::dump(parsed.tree);
     return 0;
 }
 
-int compile_source(const std::filesystem::path& source_path, const std::filesystem::path& output_path) {
-    std::string error;
-    std::string source = read_text_file(source_path, error);
-    if (!error.empty()) {
-        std::cerr << error << '\n';
-        return 1;
-    }
+int repl() {
+    suru::front::ParserSession session;
+    std::string line;
+    bool continuation = false;
 
-    auto compiled = suru::front::compile(source);
-    if (!compiled.ok()) {
-        for (const auto& diag : compiled.diagnostics) {
-            std::cerr << source_path.string() << ':' << diag.location.line << ':' << diag.location.column
-                      << ": error: " << diag.message << '\n';
+    while (true) {
+        std::cout << (continuation ? ">> " : "> ");
+        std::cout.flush();
+
+        if (!std::getline(std::cin, line)) {
+            std::cout << '\n';
+            return 0;
         }
-        return 1;
+
+        if (!continuation && (line == ".exit" || line == ".quit")) {
+            return 0;
+        }
+
+        suru::front::ParseSessionResult parsed = session.parse_fragment(line + "\n");
+        if (parsed.status == suru::front::ParseStatus::Incomplete) {
+            continuation = true;
+            continue;
+        }
+
+        if (parsed.status == suru::front::ParseStatus::Error) {
+            for (const auto& diag : parsed.diagnostics) {
+                std::cerr << "<repl>:" << diag.location.line << ':' << diag.location.column
+                          << ": error: " << diag.message << '\n';
+            }
+            session.reset();
+            continuation = false;
+            continue;
+        }
+
+        std::cout << suru::front::dump(parsed.tree);
+        continuation = false;
     }
-
-    std::ofstream output(output_path, std::ios::binary);
-    if (!output) {
-        std::cerr << "failed to open output file: " << output_path.string() << '\n';
-        return 1;
-    }
-
-    if (!suru::vm::serialize_module(compiled.module, output, &error)) {
-        std::cerr << "failed to write bytecode: " << error << '\n';
-        return 1;
-    }
-
-    return 0;
-}
-
-int disasm_file(const std::filesystem::path& bytecode_path) {
-    std::ifstream input(bytecode_path, std::ios::binary);
-    if (!input) {
-        std::cerr << "failed to open bytecode file: " << bytecode_path.string() << '\n';
-        return 1;
-    }
-
-    std::string error;
-    auto module = suru::vm::deserialize_module(input, &error);
-    if (!module) {
-        std::cerr << "failed to read bytecode: " << error << '\n';
-        return 1;
-    }
-
-    std::cout << suru::vm::disassemble(*module);
-    return 0;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2) {
-        print_help(std::cerr);
-        return 1;
+    if (argc == 1) {
+        return repl();
     }
 
-    const std::string_view command = argv[1];
+    const std::string_view arg1 = argv[1];
 
-    if (command == "--help" || command == "-h") {
+    if (arg1 == "--help" || arg1 == "-h") {
         print_help(std::cout);
         return 0;
     }
 
-    if (command == "run") {
-        if (argc != 3) {
-            print_help(std::cerr);
-            return 1;
-        }
-        return run_source(argv[2]);
+    if (argc == 2) {
+        return parse_source(argv[1]);
     }
 
-    if (command == "compile") {
-        if (argc != 5 || std::string_view(argv[3]) != "-o") {
-            print_help(std::cerr);
-            return 1;
-        }
-        return compile_source(argv[2], argv[4]);
-    }
-
-    if (command == "disasm") {
-        if (argc != 3) {
-            print_help(std::cerr);
-            return 1;
-        }
-        return disasm_file(argv[2]);
-    }
-
-    std::cerr << "unknown command: " << command << '\n';
+    std::cerr << "invalid arguments\n";
     print_help(std::cerr);
     return 1;
 }

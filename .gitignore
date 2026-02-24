@@ -1,5 +1,6 @@
 # Build directories
 /build/
+/out/
 /cmake-build-*/
 
 # CMake generated files
@@ -19,11 +20,25 @@ Testing/
 *.dll
 *.exe
 
-# Editor/OS noise
+# VSCode
+.vscode/
+.vscode-test/
+*.code-workspace
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+ipch/
+*.opendb
+
+# OS noise
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
 
 # Logs and temp files
 *.log
