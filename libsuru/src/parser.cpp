@@ -32,6 +32,12 @@ public:
     explicit Parser(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
 
     ParseResult run() {
+        if (tokens_.empty()) {
+            tokens_.push_back(Token {TokenKind::EndOfFile, "", SourceLocation {}});
+        } else if (tokens_.back().kind != TokenKind::EndOfFile) {
+            tokens_.push_back(Token {TokenKind::EndOfFile, "", tokens_.back().location});
+        }
+
         ParseResult result;
         result.tree.root = parse_root();
         result.diagnostics = std::move(diagnostics_);

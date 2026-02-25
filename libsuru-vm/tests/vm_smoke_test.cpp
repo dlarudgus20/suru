@@ -1,8 +1,8 @@
 #include "suru/vm/vm.hpp"
 
-#include <iostream>
+#include <gtest/gtest.h>
 
-int main() {
+TEST(VmSmokeTest, ExecutesSimpleAddProgram) {
     suru::vm::BytecodeModule module;
     module.instructions = {
         {suru::vm::Opcode::ConstI64, 2},
@@ -12,14 +12,8 @@ int main() {
     };
 
     auto result = suru::vm::execute(module);
-    if (result.exit_code != 0) {
-        std::cerr << "execution failed: " << result.error_message << '\n';
-        return 1;
-    }
-    if (result.final_stack.size() != 1 || result.final_stack.back() != 5) {
-        std::cerr << "unexpected stack result\n";
-        return 1;
-    }
-
-    return 0;
+    ASSERT_EQ(result.exit_code, 0);
+    ASSERT_EQ(result.final_stack.size(), 1U);
+    EXPECT_EQ(result.final_stack.back(), 5);
 }
+
