@@ -1,5 +1,7 @@
 add_library(libsuru-vm STATIC
+    src/object.cpp
     src/vm.cpp
+    src/vm_exec.cpp
 )
 
 target_include_directories(libsuru-vm

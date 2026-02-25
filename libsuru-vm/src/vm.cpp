@@ -1,246 +1,104 @@
 #include "suru/vm/vm.hpp"
 
-#include <array>
-#include <cstdint>
-#include <iomanip>
-#include <iostream>
-#include <istream>
-#include <ostream>
-#include <sstream>
+#include <functional>
+#include <cstdlib>
+#include <cstring>
+#include <new>
 #include <string>
+#include <utility>
+#include <stdexcept>
 
 namespace suru::vm {
-namespace {
 
-constexpr std::array<char, 4> kMagic {'S', 'U', 'R', 'U'};
+template <typename T>
+T* VM::allocate_object(size_t size, size_t align) {
+    size_t header = (sizeof(T) + align - 1) & ~(align - 1);
 
-bool write_u8(std::ostream& out, std::uint8_t value) {
-    out.put(static_cast<char>(value));
-    return static_cast<bool>(out);
+    T* object = static_cast<T*>(std::malloc(header + size));
+    new (object) T {};
+
+    object->next = objects_;
+    objects_ = object;
+    return object;
 }
 
-bool write_u32(std::ostream& out, std::uint32_t value) {
-    for (int shift = 0; shift < 32; shift += 8) {
-        if (!write_u8(out, static_cast<std::uint8_t>((value >> shift) & 0xFF))) {
-            return false;
+VM::VM() {
+    global_table_ = load_table();
+}
+
+VM::~VM() {
+    Object* cursor = objects_;
+    while (cursor != nullptr) {
+        Object* next = cursor->next;
+        switch (cursor->kind) {
+            case ObjectKind::String: static_cast<String*>(cursor)->~String(); break;
+            case ObjectKind::Table: static_cast<Table*>(cursor)->~Table(); break;
+            case ObjectKind::Closure: static_cast<Closure*>(cursor)->~Closure(); break;
+            default: std::unreachable();
         }
-    }
-    return true;
-}
-
-bool write_i64(std::ostream& out, std::int64_t value) {
-    const auto raw = static_cast<std::uint64_t>(value);
-    for (int shift = 0; shift < 64; shift += 8) {
-        if (!write_u8(out, static_cast<std::uint8_t>((raw >> shift) & 0xFF))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-std::optional<std::uint8_t> read_u8(std::istream& in) {
-    const int ch = in.get();
-    if (ch == EOF) {
-        return std::nullopt;
-    }
-    return static_cast<std::uint8_t>(ch);
-}
-
-std::optional<std::uint32_t> read_u32(std::istream& in) {
-    std::uint32_t value = 0;
-    for (int shift = 0; shift < 32; shift += 8) {
-        auto byte = read_u8(in);
-        if (!byte) {
-            return std::nullopt;
-        }
-        value |= static_cast<std::uint32_t>(*byte) << shift;
-    }
-    return value;
-}
-
-std::optional<std::int64_t> read_i64(std::istream& in) {
-    std::uint64_t value = 0;
-    for (int shift = 0; shift < 64; shift += 8) {
-        auto byte = read_u8(in);
-        if (!byte) {
-            return std::nullopt;
-        }
-        value |= static_cast<std::uint64_t>(*byte) << shift;
-    }
-    return static_cast<std::int64_t>(value);
-}
-
-const char* opcode_name(Opcode opcode) {
-    switch (opcode) {
-        case Opcode::Halt: return "HALT";
-        case Opcode::ConstI64: return "CONST_I64";
-        case Opcode::AddI64: return "ADD_I64";
-        case Opcode::PrintTop: return "PRINT_TOP";
-        default: return "UNKNOWN";
+        std::free(cursor);
+        cursor = next;
     }
 }
 
-bool has_operand(Opcode opcode) {
-    return opcode == Opcode::ConstI64;
+String* VM::load_string(std::string_view text) {
+    auto it = interned_strings_.find(text);
+    if (it != interned_strings_.end()) {
+        return *it;
+    }
+
+    String* object = allocate_object<String>(text.size(), 1);
+    std::memcpy(const_cast<char*>(object->data()), text.data(), text.size());
+    object->len = text.size();
+    object->hash = std::hash<std::string_view> {}(text);
+    interned_strings_.emplace(object);
+
+    v_stack_.push_back(Value::string(object));
+    return object;
 }
 
-} // namespace
-
-bool serialize_module(const BytecodeModule& module, std::ostream& out, std::string* error) {
-    for (char c : kMagic) {
-        out.put(c);
-    }
-    if (!write_u32(out, module.version)) {
-        if (error) {
-            *error = "failed to write module version";
-        }
-        return false;
-    }
-
-    if (!write_u32(out, static_cast<std::uint32_t>(module.instructions.size()))) {
-        if (error) {
-            *error = "failed to write instruction count";
-        }
-        return false;
-    }
-
-    for (const auto& instruction : module.instructions) {
-        if (!write_u8(out, static_cast<std::uint8_t>(instruction.opcode))) {
-            if (error) {
-                *error = "failed to write opcode";
-            }
-            return false;
-        }
-
-        if (has_operand(instruction.opcode) && !write_i64(out, instruction.operand)) {
-            if (error) {
-                *error = "failed to write instruction operand";
-            }
-            return false;
-        }
-    }
-
-    return static_cast<bool>(out);
+Table* VM::load_table() {
+    Table* object = allocate_object<Table>(0, 1);
+    v_stack_.push_back(Value::table(object));
+    return object;
 }
 
-std::optional<BytecodeModule> deserialize_module(std::istream& in, std::string* error) {
-    for (char expected : kMagic) {
-        const int ch = in.get();
-        if (ch == EOF || static_cast<char>(ch) != expected) {
-            if (error) {
-                *error = "invalid bytecode magic";
-            }
-            return std::nullopt;
-        }
+Closure* VM::load_closure_c(CFunction func, size_t n) {
+    Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
+    object->code = nullptr;
+    object->cfunc = func;
+    object->len = n;
+    for (std::size_t i = 0; i < n; ++i) {
+        new (&object->at(i)) Value {};
     }
-
-    auto version = read_u32(in);
-    auto count = read_u32(in);
-    if (!version || !count) {
-        if (error) {
-            *error = "truncated module header";
-        }
-        return std::nullopt;
-    }
-
-    BytecodeModule module;
-    module.version = *version;
-    module.instructions.reserve(*count);
-
-    for (std::uint32_t i = 0; i < *count; ++i) {
-        auto opcode_byte = read_u8(in);
-        if (!opcode_byte) {
-            if (error) {
-                *error = "truncated opcode stream";
-            }
-            return std::nullopt;
-        }
-
-        Instruction instruction;
-        instruction.opcode = static_cast<Opcode>(*opcode_byte);
-
-        if (has_operand(instruction.opcode)) {
-            auto operand = read_i64(in);
-            if (!operand) {
-                if (error) {
-                    *error = "truncated instruction operand";
-                }
-                return std::nullopt;
-            }
-            instruction.operand = *operand;
-        }
-
-        module.instructions.push_back(instruction);
-    }
-
-    return module;
+    v_stack_.push_back(Value::closure(object));
+    return object;
 }
 
-std::string disassemble(const BytecodeModule& module) {
-    std::ostringstream out;
-    out << "module_version " << module.version << '\n';
-    for (std::size_t i = 0; i < module.instructions.size(); ++i) {
-        const auto& instruction = module.instructions[i];
-        out << std::setw(4) << i << "  " << opcode_name(instruction.opcode);
-        if (has_operand(instruction.opcode)) {
-            out << ' ' << instruction.operand;
-        }
-        out << '\n';
-    }
-    return out.str();
+CodeUnit* VM::load_code_unit() {
+    code_units_.push_back(std::make_unique<CodeUnit>());
+    return code_units_.back().get();
 }
 
-ExecutionResult execute(const BytecodeModule& module, const VMOptions& options) {
-    ExecutionResult result;
-    std::ostream* out = options.out != nullptr ? options.out : &std::cout;
-
-    for (std::size_t pc = 0; pc < module.instructions.size(); ++pc) {
-        const auto& instruction = module.instructions[pc];
-
-        if (options.trace) {
-            *out << "pc=" << pc << " op=" << opcode_name(instruction.opcode) << '\n';
-        }
-
-        switch (instruction.opcode) {
-            case Opcode::Halt:
-                result.final_stack = result.final_stack;
-                return result;
-            case Opcode::ConstI64:
-                if (result.final_stack.size() >= options.max_stack) {
-                    result.exit_code = 1;
-                    result.error_message = "stack overflow";
-                    return result;
-                }
-                result.final_stack.push_back(instruction.operand);
-                break;
-            case Opcode::AddI64:
-                if (result.final_stack.size() < 2) {
-                    result.exit_code = 1;
-                    result.error_message = "stack underflow on ADD_I64";
-                    return result;
-                } {
-                    const auto rhs = result.final_stack.back();
-                    result.final_stack.pop_back();
-                    const auto lhs = result.final_stack.back();
-                    result.final_stack.back() = lhs + rhs;
-                }
-                break;
-            case Opcode::PrintTop:
-                if (result.final_stack.empty()) {
-                    result.exit_code = 1;
-                    result.error_message = "stack underflow on PRINT_TOP";
-                    return result;
-                }
-                *out << result.final_stack.back() << '\n';
-                break;
-            default:
-                result.exit_code = 1;
-                result.error_message = "unknown opcode";
-                return result;
-        }
+Closure* VM::load_closure(CodeUnit* cu, size_t chunk_index, size_t n) {
+    Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
+    object->code = cu;
+    object->chunk_index = chunk_index;
+    object->len = n;
+    for (std::size_t i = 0; i < n; ++i) {
+        new (&object->at(i)) Value {};
     }
+    v_stack_.push_back(Value::closure(object));
+    return object;
+}
 
-    return result;
+Table* VM::globals() {
+    return global_table_;
+}
+
+const Table* VM::globals() const {
+    return global_table_;
 }
 
 } // namespace suru::vm
+

@@ -5,7 +5,8 @@
 
 ## 기본 구조
 진단 정보는 아래 형식으로 출력한다.
-- `<path>:<line>:<column>: error: <message>`
+- parse 오류: `<path>:line:col: error: ...`
+- runtime 오류: `<path>:line:col: runtime error: ...`
 
 REPL 모드에서는 파일 경로가 `<repl>`로 출력된다.
 
