@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,29 +26,23 @@ struct ParseTree {
     ParseNode root;
 };
 
+enum class ParseStatus {
+    Ok,
+    Incomplete,
+    Error,
+};
+
 struct ParseResult {
+    ParseStatus status {ParseStatus::Error};
     ParseTree tree;
     std::vector<Diagnostic> diagnostics;
+    std::string filename;
 
     [[nodiscard]] bool ok() const {
-        return diagnostics.empty();
+        return status == ParseStatus::Ok;
     }
 };
 
-class Parser {
-public:
-    explicit Parser(std::vector<Token> tokens);
-    ~Parser();
-    Parser(Parser&&) noexcept;
-    Parser& operator=(Parser&&) noexcept;
-    Parser(const Parser&) = delete;
-    Parser& operator=(const Parser&) = delete;
-
-    ParseResult run();
-
-private:
-    class Impl;
-    std::unique_ptr<Impl> impl_;
-};
+ParseResult parse_tokens(std::vector<Token> tokens);
 
 } // namespace suru::front

@@ -23,76 +23,77 @@ const std::unordered_map<std::string, TokenKind>& keywords() {
     return table;
 }
 
-} // namespace
+class Lexer {
+public:
+    explicit Lexer(std::string_view source, SourceLocation start_location) : source_(source), location_(start_location) {}
 
-Lexer::Lexer(std::string_view source) : source_(source) {}
+    std::vector<Token> tokenize() {
+        std::vector<Token> tokens;
+        while (!at_end()) {
+            skip_ignored();
+            if (at_end()) {
+                break;
+            }
+            tokens.push_back(scan_token());
+        }
+        tokens.push_back(Token {TokenKind::EndOfFile, "", location_});
+        return tokens;
+    }
 
-std::vector<Token> Lexer::tokenize() {
-    std::vector<Token> tokens;
-    while (!at_end()) {
-        skip_ignored();
+private:
+    bool at_end() const {
+        return index_ >= source_.size();
+    }
+
+    char peek(std::size_t offset = 0) const {
+        if (index_ + offset >= source_.size()) {
+            return '\0';
+        }
+        return source_[index_ + offset];
+    }
+
+    char advance() {
         if (at_end()) {
+            return '\0';
+        }
+        char ch = source_[index_++];
+        if (ch == '\n') {
+            ++location_.line;
+            location_.column = 1;
+        } else {
+            ++location_.column;
+        }
+        return ch;
+    }
+
+    bool match(char expected) {
+        if (peek() != expected) {
+            return false;
+        }
+        advance();
+        return true;
+    }
+
+    void skip_ignored() {
+        while (!at_end()) {
+            if (std::isspace(static_cast<unsigned char>(peek())) != 0) {
+                advance();
+                continue;
+            }
+            if (peek() == '-' && peek(1) == '-') {
+                advance();
+                advance();
+                while (!at_end() && peek() != '\n') {
+                    advance();
+                }
+                continue;
+            }
             break;
         }
-        tokens.push_back(scan_token());
     }
-    tokens.push_back(Token {TokenKind::EndOfFile, "", {line_, column_}});
-    return tokens;
-}
 
-bool Lexer::at_end() const {
-    return index_ >= source_.size();
-}
-
-char Lexer::peek(std::size_t offset) const {
-    if (index_ + offset >= source_.size()) {
-        return '\0';
-    }
-    return source_[index_ + offset];
-}
-
-char Lexer::advance() {
-    if (at_end()) {
-        return '\0';
-    }
-    char ch = source_[index_++];
-    if (ch == '\n') {
-        ++line_;
-        column_ = 1;
-    } else {
-        ++column_;
-    }
-    return ch;
-}
-
-bool Lexer::match(char expected) {
-    if (peek() != expected) {
-        return false;
-    }
-    advance();
-    return true;
-}
-
-void Lexer::skip_ignored() {
-    while (!at_end()) {
-        if (std::isspace(static_cast<unsigned char>(peek())) != 0) {
-            advance();
-            continue;
-        }
-        if (peek() == '-' && peek(1) == '-') {
-            advance();
-            advance();
-            while (!at_end() && peek() != '\n') {
-                advance();
-            }
-            continue;
-        }
-        break;
-    }
-}
-
-Token Lexer::scan_token() {
-    SourceLocation loc {line_, column_};
+    Token scan_token() {
+    SourceLocation loc = location_;
     const char ch = peek();
 
     if (std::isalpha(static_cast<unsigned char>(ch)) != 0 || ch == '_') {
@@ -180,7 +181,7 @@ Token Lexer::scan_token() {
     }
 }
 
-Token Lexer::scan_identifier_or_keyword(SourceLocation loc) {
+    Token scan_identifier_or_keyword(SourceLocation loc) {
     const std::size_t start = index_;
     while (std::isalnum(static_cast<unsigned char>(peek())) != 0 || peek() == '_') {
         advance();
@@ -193,7 +194,7 @@ Token Lexer::scan_identifier_or_keyword(SourceLocation loc) {
     return Token {TokenKind::Identifier, std::move(text), loc};
 }
 
-Token Lexer::scan_number(SourceLocation loc) {
+    Token scan_number(SourceLocation loc) {
     const std::size_t start = index_;
     while (std::isdigit(static_cast<unsigned char>(peek())) != 0) {
         advance();
@@ -206,7 +207,7 @@ Token Lexer::scan_number(SourceLocation loc) {
     }
     if (peek() == 'e' || peek() == 'E') {
         const std::size_t save = index_;
-        const std::size_t save_column = column_;
+        const SourceLocation save_location = location_;
         advance();
         if (peek() == '+' || peek() == '-') {
             advance();
@@ -217,13 +218,13 @@ Token Lexer::scan_number(SourceLocation loc) {
             }
         } else {
             index_ = save;
-            column_ = save_column;
+            location_ = save_location;
         }
     }
     return Token {TokenKind::Numeral, std::string(source_.substr(start, index_ - start)), loc};
 }
 
-Token Lexer::scan_string(SourceLocation loc, char quote) {
+    Token scan_string(SourceLocation loc, char quote) {
     advance();
     std::string value;
     while (!at_end()) {
@@ -238,6 +239,24 @@ Token Lexer::scan_string(SourceLocation loc, char quote) {
         }
     }
     return Token {TokenKind::Unknown, std::move(value), loc};
+}
+
+    std::string_view source_;
+    std::size_t index_ {0};
+    SourceLocation location_ {};
+};
+
+} // namespace
+
+std::vector<Token> tokenize(std::string_view source, SourceLocation start_location) {
+    return Lexer(source, start_location).tokenize();
+}
+
+SourceLocation end_location(const std::vector<Token>& tokens) {
+    if (tokens.empty()) {
+        return SourceLocation {};
+    }
+    return tokens.back().location;
 }
 
 } // namespace suru::front

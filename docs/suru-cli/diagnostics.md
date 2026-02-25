@@ -41,7 +41,7 @@ REPL 모드가 아니라면 `Incomplete`는 `unexpected end of file` 진단 1개
 
 ### 4) 불완전 입력 요약
 - `unexpected end of file`
-  - `ParserSession`에서 미완성으로 판정된 입력을 `parse()`가 단일 진단으로 요약한 값
+  - 파서가 `Incomplete`로 판정한 입력을 `parse()`가 단일 진단으로 요약한 값
 
 ## 원인 빠른 매핑
 - 괄호/중괄호/대괄호/블록 키워드 누락: `expected ')'`, `expected '}'`, `expected 'end'` 등

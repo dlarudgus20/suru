@@ -1,8 +1,6 @@
 
 #include "suru/front/parser.hpp"
-#include "suru/front/lexer.hpp"
 
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,16 +27,18 @@ void add_list(ParseNode& node, std::string key, std::vector<ParseNode> list) {
     node.lists.push_back({std::move(key), std::move(list)});
 }
 
-} // namespace
-
-class Parser::Impl {
+class Parser {
 public:
-    explicit Impl(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
+    explicit Parser(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
 
     ParseResult run() {
         ParseResult result;
         result.tree.root = parse_root();
         result.diagnostics = std::move(diagnostics_);
+        if (status_ == ParseStatus::Ok && !result.diagnostics.empty()) {
+            status_ = ParseStatus::Error;
+        }
+        result.status = status_;
         return result;
     }
 
@@ -635,17 +635,36 @@ private:
         if (current().kind == kind) {
             return advance();
         }
+        if (current().kind == TokenKind::EndOfFile) {
+            incomplete_here();
+            return Token {kind, "", current().location};
+        }
         error_here(message);
         return Token {kind, "", current().location};
     }
 
     void error_here(const std::string& message) {
+        if (current().kind == TokenKind::EndOfFile) {
+            incomplete_here();
+            return;
+        }
         error_at(current().location, message);
+    }
+
+    void incomplete_here() {
+        if (!failed_) {
+            diagnostics_.push_back({current().location, "unexpected end of file"});
+        }
+        status_ = ParseStatus::Incomplete;
+        failed_ = true;
     }
 
     void error_at(SourceLocation location, const std::string& message) {
         if (!failed_) {
             diagnostics_.push_back({location, message});
+        }
+        if (status_ == ParseStatus::Ok) {
+            status_ = ParseStatus::Error;
         }
         failed_ = true;
     }
@@ -653,17 +672,14 @@ private:
     std::vector<Token> tokens_;
     std::size_t index_ {0};
     bool failed_ {false};
+    ParseStatus status_ {ParseStatus::Ok};
     std::vector<Diagnostic> diagnostics_;
 };
 
-Parser::Parser(std::vector<Token> tokens) : impl_(std::make_unique<Impl>(std::move(tokens))) {}
+} // namespace
 
-Parser::~Parser() = default;
-Parser::Parser(Parser&&) noexcept = default;
-Parser& Parser::operator=(Parser&&) noexcept = default;
-
-ParseResult Parser::run() {
-    return impl_->run();
+ParseResult parse_tokens(std::vector<Token> tokens) {
+    return Parser(std::move(tokens)).run();
 }
 
 } // namespace suru::front

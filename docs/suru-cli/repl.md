@@ -5,8 +5,8 @@
 - `suru <file>`: 파일 파싱 후 트리 출력
 
 ## 입력 처리
-REPL은 `ParserSession`을 사용해 라인 단위 입력을 누적 파싱한다.
-입력 라인마다 `parse_fragment(line + "\n")`를 호출한다.
+REPL은 `ParseContext`를 사용해 라인 단위 입력을 누적 파싱한다.
+입력 라인마다 `parse(line + "\n", context)`를 호출한다.
 
 ## 상태 전이
 - `ParseStatus::Ok`
@@ -17,7 +17,7 @@ REPL은 `ParserSession`을 사용해 라인 단위 입력을 누적 파싱한다
   - 추가 입력을 기다림
 - `ParseStatus::Error`
   - 진단 메시지 출력
-  - 세션 `reset()` 후 다음 입력으로 진행
+  - 입력 버퍼를 비우고 다음 입력으로 진행
 
 ## 프롬프트
 - 기본 프롬프트: `> `

@@ -37,10 +37,10 @@ int parse_source(const std::filesystem::path& source_path) {
         return 1;
     }
 
-    auto parsed = suru::front::parse(source);
+    auto parsed = suru::front::parse(source, source_path.string());
     if (!parsed.ok()) {
         for (const auto& diag : parsed.diagnostics) {
-            std::cerr << source_path.string() << ':' << diag.location.line << ':' << diag.location.column
+            std::cerr << parsed.filename << ':' << diag.location.line << ':' << diag.location.column
                       << ": error: " << diag.message << '\n';
         }
         return 1;
@@ -51,7 +51,7 @@ int parse_source(const std::filesystem::path& source_path) {
 }
 
 int repl() {
-    suru::front::ParserSession session;
+    suru::front::ParseContext context {"<repl>"};
     std::string line;
     bool continuation = false;
 
@@ -68,7 +68,8 @@ int repl() {
             return 0;
         }
 
-        suru::front::ParseSessionResult parsed = session.parse_fragment(line + "\n");
+        suru::front::ParseResult parsed = suru::front::parse(line + "\n", context);
+
         if (parsed.status == suru::front::ParseStatus::Incomplete) {
             continuation = true;
             continue;
@@ -76,10 +77,9 @@ int repl() {
 
         if (parsed.status == suru::front::ParseStatus::Error) {
             for (const auto& diag : parsed.diagnostics) {
-                std::cerr << "<repl>:" << diag.location.line << ':' << diag.location.column
+                std::cerr << parsed.filename << ':' << diag.location.line << ':' << diag.location.column
                           << ": error: " << diag.message << '\n';
             }
-            session.reset();
             continuation = false;
             continue;
         }

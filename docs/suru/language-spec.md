@@ -17,7 +17,7 @@
 - 노드 구조: `kind`, `loc`, `attributes`, `nodes`, `lists`.
 
 ## 세션 파싱(REPL)
-- `suru::front::ParserSession::parse_fragment()`는 입력 조각을 누적해 파싱한다.
+- `suru::front::parse(source_fragment, ParseContext&)`는 입력 조각을 누적해 파싱한다.
 - 반환 상태:
   - `ParseStatus::Ok`: 완전한 구문
   - `ParseStatus::Incomplete`: 추가 입력 필요

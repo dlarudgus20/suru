@@ -51,8 +51,7 @@ int main() {
     }
 
     {
-        suru::front::Lexer lexer("1e+ x");
-        const auto tokens = lexer.tokenize();
+        const auto tokens = suru::front::tokenize("1e+ x");
         if (tokens.size() < 5 || tokens[0].kind != suru::front::TokenKind::Numeral || tokens[0].lexeme != "1" ||
             tokens[1].kind != suru::front::TokenKind::Identifier || tokens[1].location.column != 2 ||
             tokens[2].kind != suru::front::TokenKind::Plus || tokens[2].location.column != 3 ||
@@ -64,8 +63,7 @@ int main() {
     }
 
     {
-        suru::front::Lexer lexer("1e x");
-        const auto tokens = lexer.tokenize();
+        const auto tokens = suru::front::tokenize("1e x");
         if (tokens.size() < 4 || tokens[0].kind != suru::front::TokenKind::Numeral || tokens[0].lexeme != "1" ||
             tokens[1].kind != suru::front::TokenKind::Identifier || tokens[1].location.column != 2 ||
             tokens[2].kind != suru::front::TokenKind::Identifier || tokens[2].lexeme != "x" ||
@@ -76,8 +74,7 @@ int main() {
     }
 
     {
-        suru::front::Lexer lexer("1E- y");
-        const auto tokens = lexer.tokenize();
+        const auto tokens = suru::front::tokenize("1E- y");
         if (tokens.size() < 5 || tokens[0].kind != suru::front::TokenKind::Numeral || tokens[0].lexeme != "1" ||
             tokens[1].kind != suru::front::TokenKind::Identifier || tokens[1].location.column != 2 ||
             tokens[2].kind != suru::front::TokenKind::Minus || tokens[2].location.column != 3 ||
@@ -89,8 +86,7 @@ int main() {
     }
 
     {
-        suru::front::Lexer lexer("x = .1");
-        const auto tokens = lexer.tokenize();
+        const auto tokens = suru::front::tokenize("x = .1");
         if (tokens.size() < 5 || tokens[0].kind != suru::front::TokenKind::Identifier || tokens[0].lexeme != "x" ||
             tokens[2].kind != suru::front::TokenKind::Dot ||
             tokens[3].kind != suru::front::TokenKind::Numeral || tokens[3].lexeme != "1") {
@@ -116,27 +112,27 @@ int main() {
         return 1;
     }
 
-    suru::front::ParserSession session;
-    auto incomplete = session.parse_fragment("if x then\n");
+    suru::front::ParseContext repl_context;
+    auto incomplete = suru::front::parse("if x then\n", repl_context);
     if (incomplete.status != suru::front::ParseStatus::Incomplete) {
         std::cerr << "expected incomplete status\n";
         return 1;
     }
 
-    suru::front::ParserSession bad_elseif;
-    auto bad_elseif_result = bad_elseif.parse_fragment("if x then elseif then end\n");
+    suru::front::ParseContext bad_elseif_context;
+    auto bad_elseif_result = suru::front::parse("if x then elseif then end\n", bad_elseif_context);
     if (bad_elseif_result.status != suru::front::ParseStatus::Error) {
         std::cerr << "elseif syntax error should not be incomplete\n";
         return 1;
     }
 
-    auto recovered = session.parse_fragment("return x\nend\n");
+    auto recovered = suru::front::parse("return x\nend\n", repl_context);
     if (recovered.status != suru::front::ParseStatus::Ok) {
         std::cerr << "expected recovered parse success\n";
         return 1;
     }
 
-    auto invalid = session.parse_fragment("local = 1\n");
+    auto invalid = suru::front::parse("local = 1\n", repl_context);
     if (invalid.status != suru::front::ParseStatus::Error) {
         std::cerr << "expected parse error status\n";
         return 1;
