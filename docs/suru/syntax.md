@@ -9,6 +9,7 @@ Name       ::= ( letter | '_' ) { letter | digit | '_' }
 Numeral    ::= digit { digit } [ '.' digit { digit } ] [ Exponent ]
 Exponent   ::= ('e' | 'E') [ '+' | '-' ] digit { digit }
 String     ::= '"' { char } '"' | '\'' { char } '\''
+Comment    ::= '--' { char - '\n' } [ '\n' ]
 ```
 
 ## Statements
@@ -26,8 +27,8 @@ stat       ::= varlist '=' explist
              | 'if' exp 'then' block { 'elseif' exp 'then' block } [ 'else' block ] 'end'
              | 'for' Name '=' exp ',' exp [ ',' exp ] 'do' block 'end'
              | 'for' namelist 'in' explist 'do' block 'end'
-             | 'function' funcname funcbody
-             | 'local' 'function' Name funcbody
+             | 'fn' funcname funcbody
+             | 'local' 'fn' Name funcbody
              | 'local' attnamelist [ '=' explist ]
 
 retstat    ::= 'return' [ explist ]
@@ -58,7 +59,7 @@ exp        ::= 'nil'
 prefixexp  ::= var | functioncall | '(' exp ')'
 functioncall ::= prefixexp args | prefixexp ':' Name args
 args       ::= '(' [ explist ] ')' | tableconstructor | String
-functiondef::= 'function' funcbody
+functiondef::= 'fn' funcbody
 funcbody   ::= '(' [ parlist ] ')' block 'end'
 parlist    ::= namelist [ ',' '...' ] | '...'
 ```
@@ -75,10 +76,10 @@ fieldsep         ::= ',' | ';'
 
 ## Operators
 ```ebnf
-binop      ::= '+' | '-' | '*' | '/' | '//' | '^' | '%'
-             | '&' | '~' | '|' | '>>' | '<<'
+binop      ::= '+' | '-' | '*' | '/' | '//' | '^^' | '%'
+             | '&' | '^' | '|' | '>>' | '<<'
              | '..'
-             | '<' | '<=' | '>' | '>=' | '==' | '~='
+             | '<' | '<=' | '>' | '>=' | '==' | '!='
              | 'and' | 'or'
 
 unop       ::= '-' | 'not' | '#' | '~'
@@ -86,16 +87,16 @@ unop       ::= '-' | 'not' | '#' | '~'
 
 ## 우선순위 (높음 -> 낮음)
 ```text
-^,
+^^,
 unary(- not # ~),
 * / // %,
 + -,
 ..,
 << >>,
 &,
-~,
+^,
 |,
-< <= > >= ~= ==,
+< <= > >= != ==,
 and,
 or
 ```

@@ -13,7 +13,7 @@ const std::unordered_map<std::string, TokenKind>& keywords() {
         {"and", TokenKind::KwAnd},       {"break", TokenKind::KwBreak}, {"do", TokenKind::KwDo},
         {"else", TokenKind::KwElse},     {"elseif", TokenKind::KwElseIf},
         {"end", TokenKind::KwEnd},       {"false", TokenKind::KwFalse}, {"for", TokenKind::KwFor},
-        {"function", TokenKind::KwFunction},
+        {"fn", TokenKind::KwFunction},
         {"goto", TokenKind::KwGoto},     {"if", TokenKind::KwIf},       {"in", TokenKind::KwIn},
         {"local", TokenKind::KwLocal},   {"nil", TokenKind::KwNil},     {"not", TokenKind::KwNot},
         {"or", TokenKind::KwOr},         {"repeat", TokenKind::KwRepeat},
@@ -120,7 +120,12 @@ private:
         case '-': advance(); return Token {TokenKind::Minus, "-", loc};
         case '*': advance(); return Token {TokenKind::Star, "*", loc};
         case '%': advance(); return Token {TokenKind::Percent, "%", loc};
-        case '^': advance(); return Token {TokenKind::Caret, "^", loc};
+        case '^':
+            advance();
+            if (match('^')) {
+                return Token {TokenKind::Pow, "^^", loc};
+            }
+            return Token {TokenKind::Caret, "^", loc};
         case '#': advance(); return Token {TokenKind::Hash, "#", loc};
         case '&': advance(); return Token {TokenKind::Amp, "&", loc};
         case '|': advance(); return Token {TokenKind::Pipe, "|", loc};
@@ -136,11 +141,14 @@ private:
                 return Token {TokenKind::EqEq, "==", loc};
             }
             return Token {TokenKind::Assign, "=", loc};
-        case '~':
+        case '!':
             advance();
             if (match('=')) {
-                return Token {TokenKind::NotEq, "~=", loc};
+                return Token {TokenKind::NotEq, "!=", loc};
             }
+            return Token {TokenKind::Unknown, "!", loc};
+        case '~':
+            advance();
             return Token {TokenKind::Tilde, "~", loc};
         case '<':
             advance();

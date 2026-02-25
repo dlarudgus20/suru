@@ -208,7 +208,7 @@ private:
 
     ParseNode parse_function_statement() {
         ParseNode node = make_node("FunctionStatement", current().location);
-        consume(TokenKind::KwFunction, "expected 'function'");
+        consume(TokenKind::KwFunction, "expected 'fn'");
         add_node(node, "name", parse_function_name());
         add_node(node, "body", parse_function_body());
         return node;
@@ -588,7 +588,7 @@ private:
             case TokenKind::NotEq:
                 left = 3; right = 3; return true;
             case TokenKind::Pipe: left = 4; right = 4; return true;
-            case TokenKind::Tilde: left = 5; right = 5; return true;
+            case TokenKind::Caret: left = 5; right = 5; return true;
             case TokenKind::Amp: left = 6; right = 6; return true;
             case TokenKind::ShiftLeft:
             case TokenKind::ShiftRight:
@@ -602,7 +602,7 @@ private:
             case TokenKind::SlashSlash:
             case TokenKind::Percent:
                 left = 10; right = 10; return true;
-            case TokenKind::Caret: left = 12; right = 11; return true;
+            case TokenKind::Pow: left = 12; right = 11; return true;
             default: return false;
         }
     }

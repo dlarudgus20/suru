@@ -116,3 +116,30 @@ TEST(FrontSmokeTest, ParseContextHandlesIncompleteAndRecovery) {
     EXPECT_EQ(invalid.status, suru::front::ParseStatus::Error);
 }
 
+TEST(FrontSmokeTest, UsesFnKeywordForFunction) {
+    auto ok = suru::front::parse("fn add1(x) return x + 1 end");
+    EXPECT_TRUE(ok.ok());
+
+    auto old_keyword = suru::front::parse("function add1(x) return x + 1 end");
+    EXPECT_FALSE(old_keyword.ok());
+}
+
+TEST(FrontSmokeTest, UsesBangEqualForNotEqual) {
+    auto ok = suru::front::parse("return 1 != 2");
+    EXPECT_TRUE(ok.ok());
+
+    auto old_operator = suru::front::parse("return 1 ~= 2");
+    EXPECT_FALSE(old_operator.ok());
+}
+
+TEST(FrontSmokeTest, UsesCaretForXorAndDoubleCaretForPower) {
+    auto xor_ok = suru::front::parse("return 1 ^ 2");
+    EXPECT_TRUE(xor_ok.ok());
+
+    auto pow_ok = suru::front::parse("return 2 ^^ 3");
+    EXPECT_TRUE(pow_ok.ok());
+
+    auto old_xor = suru::front::parse("return 1 ~ 2");
+    EXPECT_FALSE(old_xor.ok());
+}
+

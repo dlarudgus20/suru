@@ -45,6 +45,7 @@ enum class TokenKind {
     SlashSlash,
     Percent,
     Caret,
+    Pow,
     Hash,
     Amp,
     Pipe,
