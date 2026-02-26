@@ -6,6 +6,7 @@
 ## 상태 구성
 VM은 아래 상태를 유지한다.
 - `objects_`: 힙 객체(String/Table/Closure) 단일 연결 리스트
+- `objects_`: 힙 객체(String/Array/Table/Closure/Upvalue) 단일 연결 리스트
 - `interned_strings_`: interned string 집합
 - `code_units_`: 로드된 `CodeUnit` 소유 컨테이너
 - `global_table_`: 전역 변수 테이블
@@ -15,8 +16,8 @@ VM은 아래 상태를 유지한다.
 생성자에서 sentinel 프레임(`closure == nullptr`)을 `i_stack_`에 1개 넣는다.
 
 ## 값과 객체
-값 종류는 `Nil`, `Boolean`, `Number`, `String`, `Table`, `Closure`다.
-- `String`, `Table`, `Closure`는 힙 객체 포인터다.
+값 종류는 `Nil`, `Boolean`, `Number`, `String`, `Array`, `Table`, `Closure`다.
+- `String`, `Array`, `Table`, `Closure`는 힙 객체 포인터다.
 - `Closure`는 두 종류다.
   - 바이트코드 클로저: `code != nullptr`
   - C 함수 클로저: `code == nullptr`, `cfunc != nullptr`

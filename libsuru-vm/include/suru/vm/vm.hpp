@@ -25,6 +25,7 @@ public:
     void call(std::uint8_t arg_count, std::uint8_t ret_slots);
 
     [[nodiscard]] String* make_string(std::string_view text);
+    [[nodiscard]] Array* make_array(std::size_t len);
     [[nodiscard]] Table* make_table();
     [[nodiscard]] Closure* make_closure_c(CFunction func, std::uint8_t n);
 

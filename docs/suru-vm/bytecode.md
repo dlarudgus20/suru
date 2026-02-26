@@ -28,15 +28,25 @@
   - 부족한 인자: `nil`로 채움
   - 초과한 인자: 무시
 
-## 문자열 연산 규약
+## 문자열/배열 연산 규약
 - `CONCAT A B C`
   - `R[B]`, `R[C]`를 문자열로 변환해 이어 붙이고 `R[A]`에 저장한다.
   - 허용 타입: `string`, `number`, `boolean`
   - 변환 규칙: `boolean`은 `true`/`false` 문자열
   - 그 외 타입은 `TypeError("concat: expected string/number/boolean")`
 - `LEN A B`
-  - `R[B]`가 `string`일 때 바이트 길이를 `number`로 `R[A]`에 저장한다.
-  - `string`이 아니면 `TypeError("len: expected string")`
+  - `R[B]`가 `string`이면 바이트 길이, `array`면 원소 수를 `number`로 `R[A]`에 저장한다.
+  - 그 외 타입이면 `TypeError("len: expected string/array")`
+- `NEWARRAY A B`
+  - `R[B]`의 number 값을 길이로 사용해 새 배열을 만들고 `R[A]`에 저장한다.
+  - 길이는 0 이상의 정수여야 하며, 아니면 `TypeError("newarray length must be non-negative integer")`
+- `GETARRAY A B C`
+  - `R[B]`는 array, `R[C]`는 인덱스(number)다.
+  - 인덱스는 0-based이며 음수는 Python 규칙으로 변환한다.
+  - 변환 후 범위를 벗어나면 `TypeError("array index out of bounds")`
+- `SETARRAY A B C`
+  - `R[A]`는 array, `R[B]`는 인덱스, `R[C]`는 저장 값이다.
+  - 인덱스 규칙/오류는 `GETARRAY`와 동일하다.
 
 ## 업밸류 캡처 규약
 `Chunk`는 `upvalue_infos`를 가진다. 각 항목은 `{ source, index }`다.
@@ -91,8 +101,11 @@ RETURN 0 1
 | EQ/NE/LT/LE/GT/GE | ABC | `A B C` | 비교 결과(bool) 저장 |
 | BAND/BOR/BXOR/SHL/SHR | ABC | `A B C` | 비트 연산 |
 | NEWTABLE | ABx | `A` | `R[A] = {}` |
+| NEWARRAY | ABx | `A B` | `R[A] = new array(len=R[B])` |
 | GETTABLE | ABC | `A B C` | `R[A] = R[B][R[C]]` |
 | SETTABLE | ABC | `A B C` | `R[A][R[B]] = R[C]` |
+| GETARRAY | ABC | `A B C` | `R[A] = R[B][idx(R[C])]` |
+| SETARRAY | ABC | `A B C` | `R[A][idx(R[B])] = R[C]` |
 | JMP | sAx | `rel` | 상대 점프 |
 | IFFALSY / IFTRUTHY | ABx | `A` | 조건 거짓일 때 다음 1워드 스킵 |
 | IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `B C` | 비교 거짓일 때 다음 1워드 스킵 |
@@ -102,5 +115,3 @@ RETURN 0 1
 | GETUPVAL | ABx | `A U` | `R[A] = upvalue[U]` |
 | SETUPVAL | ABx | `U A` | `upvalue[U] = R[A]` |
 
-## TODO
-- 배열/시퀀스 타입이 도입되면 `LEN`에 배열 길이 규칙을 추가한다.

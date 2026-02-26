@@ -234,6 +234,9 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"NEWTABLE", suru::vm::Op::NewTable},
         {"GETTABLE", suru::vm::Op::GetTable},
         {"SETTABLE", suru::vm::Op::SetTable},
+        {"NEWARRAY", suru::vm::Op::NewArray},
+        {"GETARRAY", suru::vm::Op::GetArray},
+        {"SETARRAY", suru::vm::Op::SetArray},
         {"JMP", suru::vm::Op::Jmp},
         {"IFFALSY", suru::vm::Op::IfFalsy},
         {"IFTRUTHY", suru::vm::Op::IfTruthy},
@@ -290,7 +293,8 @@ std::uint32_t emit_word(
         case suru::vm::Op::Move:
         case suru::vm::Op::Neg:
         case suru::vm::Op::Not:
-        case suru::vm::Op::Len: {
+        case suru::vm::Op::Len:
+        case suru::vm::Op::NewArray: {
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
@@ -369,6 +373,8 @@ std::uint32_t emit_word(
         case suru::vm::Op::Shr:
         case suru::vm::Op::GetTable:
         case suru::vm::Op::SetTable:
+        case suru::vm::Op::GetArray:
+        case suru::vm::Op::SetArray:
         case suru::vm::Op::Call: {
             if (inst.args.size() != 3) {
                 throw AsmError(inst.line, "opcode requires three operands");

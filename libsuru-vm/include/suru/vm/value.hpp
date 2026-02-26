@@ -17,11 +17,13 @@ enum class ValueKind {
     Boolean,
     Number,
     String,
+    Array,
     Table,
     Closure,
 };
 
 struct String;
+struct Array;
 struct Table;
 struct Closure;
 
@@ -31,6 +33,7 @@ struct Value {
         bool bool_;
         double number_;
         String* string_;
+        Array* array_;
         Table* table_;
         Closure* closure_;
     };
@@ -69,6 +72,13 @@ struct Value {
         return out;
     }
 
+    [[nodiscard]] static constexpr Value array(Array* value) {
+        Value out;
+        out.kind = ValueKind::Array;
+        out.array_ = value;
+        return out;
+    }
+
     [[nodiscard]] static constexpr Value closure(Closure* value) {
         Value out;
         out.kind = ValueKind::Closure;
@@ -94,6 +104,10 @@ struct Value {
 
     [[nodiscard]] constexpr bool is_table() const {
         return kind == ValueKind::Table;
+    }
+
+    [[nodiscard]] constexpr bool is_array() const {
+        return kind == ValueKind::Array;
     }
 
     [[nodiscard]] constexpr bool is_closure() const {
@@ -140,6 +154,13 @@ struct Value {
         return table_;
     }
 
+    [[nodiscard]] Array* as_array(std::string_view where) const {
+        if (!is_array() || array_ == nullptr) {
+            type_error(where, "array");
+        }
+        return array_;
+    }
+
     [[nodiscard]] Closure* as_closure(std::string_view where) const {
         if (!is_closure() || closure_ == nullptr) {
             type_error(where, "closure");
@@ -163,6 +184,7 @@ inline bool value_equals(Value lhs, Value rhs) {
         case ValueKind::Boolean: return lhs.bool_ == rhs.bool_;
         case ValueKind::Number: return lhs.number_ == rhs.number_;
         case ValueKind::String: return lhs.string_ == rhs.string_;
+        case ValueKind::Array: return lhs.array_ == rhs.array_;
         case ValueKind::Table: return lhs.table_ == rhs.table_;
         case ValueKind::Closure: return lhs.closure_ == rhs.closure_;
         default: return false;
@@ -184,6 +206,8 @@ inline std::size_t value_hash(Value value) {
         }
         case ValueKind::String:
             return combine_hash(seed, std::hash<std::uintptr_t> {}(reinterpret_cast<std::uintptr_t>(value.string_)));
+        case ValueKind::Array:
+            return combine_hash(seed, std::hash<std::uintptr_t> {}(reinterpret_cast<std::uintptr_t>(value.array_)));
         case ValueKind::Table:
             return combine_hash(seed, std::hash<std::uintptr_t> {}(reinterpret_cast<std::uintptr_t>(value.table_)));
         case ValueKind::Closure:

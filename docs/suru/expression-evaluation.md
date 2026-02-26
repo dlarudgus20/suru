@@ -45,7 +45,7 @@ Normative Rule:
 | --- | --- | --- |
 | `-x` | 부호 반전 | `number` |
 | `not x` | 논리 부정 (`truthy`/`falsy` 기준) | 모든 값 |
-| `#x` | 길이 연산 | `string` 또는 `table` |
+| `#x` | 길이 연산 | `string` 또는 `array` |
 | `~x` | 비트 반전 | 정수로 해석 가능한 `number` |
 
 ### 이항 연산 의미
@@ -73,6 +73,7 @@ return 2 ^^ 3, 1 ^ 2, 1 != 2, "a" .. "b"
 
 Suru Note:
 - 메타메서드 기반 연산자 오버로드는 현재 범위에서 제외한다.
+- 배열 인덱스는 0부터 시작하며, 음수 인덱스는 Python 규칙(`-1`은 마지막 원소)을 따른다.
 
 ## 테이블 식(`tableconstructor`)
 Normative Rule:

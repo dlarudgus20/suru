@@ -86,6 +86,40 @@ std::string concat_operand_to_string(Value value) {
     }
 }
 
+std::size_t to_array_length(Value value) {
+    const double raw = value.as_number("newarray length");
+    if (!std::isfinite(raw)) {
+        throw TypeError("newarray length must be non-negative integer");
+    }
+    double integral = 0.0;
+    if (std::modf(raw, &integral) != 0.0 || integral < 0.0) {
+        throw TypeError("newarray length must be non-negative integer");
+    }
+    return static_cast<std::size_t>(integral);
+}
+
+std::size_t resolve_array_index(std::size_t len, Value value) {
+    if (len > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) {
+        throw InternalError("array length exceeds int64 range");
+    }
+    const double raw = value.as_number("array index");
+    if (!std::isfinite(raw)) {
+        throw TypeError("array index must be integer");
+    }
+    double integral = 0.0;
+    if (std::modf(raw, &integral) != 0.0) {
+        throw TypeError("array index must be integer");
+    }
+    std::int64_t idx = static_cast<std::int64_t>(integral);
+    if (idx < 0) {
+        idx = static_cast<std::int64_t>(len) + idx;
+    }
+    if (idx < 0 || static_cast<std::size_t>(idx) >= len) {
+        throw TypeError("array index out of bounds");
+    }
+    return static_cast<std::size_t>(idx);
+}
+
 } // namespace
 
 Value VM::reg_read(std::uint32_t index) const {
@@ -505,13 +539,28 @@ void VM::run(std::size_t target_depth) {
             }
             case Op::Len: {
                 const auto [a, b] = decode_abx(word);
-                const String* str = reg_read(b).as_string("len");
-                reg_write(a, Value::number(static_cast<double>(str->len)));
+                const Value v = reg_read(b);
+                if (v.kind == ValueKind::String) {
+                    const String* str = v.as_string("len");
+                    reg_write(a, Value::number(static_cast<double>(str->len)));
+                    break;
+                }
+                if (v.kind == ValueKind::Array) {
+                    const Array* arr = v.as_array("len");
+                    reg_write(a, Value::number(static_cast<double>(arr->elements.size())));
+                    break;
+                }
+                throw TypeError("len: expected string/array");
                 break;
             }
             case Op::NewTable: {
                 const auto a = decode_abx(word).a;
                 reg_write(a, Value::table(make_table()));
+                break;
+            }
+            case Op::NewArray: {
+                const auto [a, b] = decode_abx(word);
+                reg_write(a, Value::array(make_array(to_array_length(reg_read(b)))));
                 break;
             }
             case Op::GetTable: {
@@ -524,12 +573,26 @@ void VM::run(std::size_t target_depth) {
                 reg_write(a, out);
                 break;
             }
+            case Op::GetArray: {
+                const auto [a, b, c] = decode_abc(word);
+                Array* array = reg_read(b).as_array("getarray");
+                const std::size_t idx = resolve_array_index(array->elements.size(), reg_read(c));
+                reg_write(a, array->elements[idx]);
+                break;
+            }
             case Op::SetTable: {
                 const auto [a, b, c] = decode_abc(word);
                 Table* table = reg_read(a).as_table("settable");
                 if (!table->set(reg_read(b), reg_read(c))) {
                     throw TableError("failed to set table key");
                 }
+                break;
+            }
+            case Op::SetArray: {
+                const auto [a, b, c] = decode_abc(word);
+                Array* array = reg_read(a).as_array("setarray");
+                const std::size_t idx = resolve_array_index(array->elements.size(), reg_read(b));
+                array->elements[idx] = reg_read(c);
                 break;
             }
             case Op::Jmp: {

@@ -19,6 +19,7 @@ std::string value_to_string(suru::vm::Value value) {
         case ValueKind::Boolean: return value.bool_ ? "true" : "false";
         case ValueKind::Number: return std::to_string(value.number_);
         case ValueKind::String: return value.string_ != nullptr ? std::string(value.string_->view()) : "<null-string>";
+        case ValueKind::Array: return "<array>";
         case ValueKind::Table: return "<table>";
         case ValueKind::Closure: return "<function>";
         default: return "<unknown>";
@@ -143,6 +144,7 @@ void std_type(suru::vm::VM* vm) {
         case suru::vm::ValueKind::Boolean: name = "boolean"; break;
         case suru::vm::ValueKind::Number: name = "number"; break;
         case suru::vm::ValueKind::String: name = "string"; break;
+        case suru::vm::ValueKind::Array: name = "array"; break;
         case suru::vm::ValueKind::Table: name = "table"; break;
         case suru::vm::ValueKind::Closure: name = "function"; break;
         default: name = "unknown"; break;

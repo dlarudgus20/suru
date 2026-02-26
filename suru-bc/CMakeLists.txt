@@ -7,5 +7,6 @@ if(BUILD_TESTING)
     add_test(NAME suru_bc_upvalue_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/upvalue.sura)
     add_test(NAME suru_bc_div_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/div.sura)
     add_test(NAME suru_bc_concat_len_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/concat_len.sura)
+    add_test(NAME suru_bc_array_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/array.sura)
 endif()
 

@@ -35,6 +35,7 @@ VM::~VM() {
         Object* next = cursor->next;
         switch (cursor->kind) {
             case ObjectKind::String: static_cast<String*>(cursor)->~String(); break;
+            case ObjectKind::Array: static_cast<Array*>(cursor)->~Array(); break;
             case ObjectKind::Table: static_cast<Table*>(cursor)->~Table(); break;
             case ObjectKind::Closure: static_cast<Closure*>(cursor)->~Closure(); break;
             case ObjectKind::Upvalue: static_cast<Upvalue*>(cursor)->~Upvalue(); break;
@@ -56,6 +57,12 @@ String* VM::make_string(std::string_view text) {
     object->len = text.size();
     object->hash = std::hash<std::string_view> {}(text);
     interned_strings_.emplace(object);
+    return object;
+}
+
+Array* VM::make_array(std::size_t len) {
+    Array* object = allocate_object<Array>(0, 1);
+    object->elements.resize(len, Value::nil());
     return object;
 }
 

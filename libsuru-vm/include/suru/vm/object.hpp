@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 #include "suru/vm/value.hpp"
 #include "suru/vm/codeunit.hpp"
@@ -15,6 +16,7 @@ using CFunction = void (*)(VM* vm);
 
 enum class ObjectKind {
     String,
+    Array,
     Table,
     Closure,
     Upvalue,
@@ -51,6 +53,12 @@ struct Table : Object {
     bool get(Value key, Value* out) const;
     bool has(Value key) const;
     bool erase(Value key);
+};
+
+struct Array : Object {
+    std::vector<Value> elements;
+
+    Array() : Object(ObjectKind::Array) {}
 };
 
 struct Upvalue : Object {

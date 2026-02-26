@@ -6,6 +6,7 @@ Suru 값은 다음 집합으로 제한한다.
 - `boolean` (`true`, `false`)
 - `number`
 - `string`
+- `array`
 - `function`
 - `table`
 
@@ -29,7 +30,7 @@ if nil then return 1 end
 ## 동등성(==, !=) 개요
 Normative Rule:
 - 같은 타입의 값끼리 비교한다.
-- 숫자/문자열/불리언은 값 비교, 테이블/함수는 참조 동일성 비교를 기본으로 둔다.
+- 숫자/문자열/불리언은 값 비교, 배열/테이블/함수는 참조 동일성 비교를 기본으로 둔다.
 
 Inference Rule:
 ```text

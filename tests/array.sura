@@ -1,0 +1,33 @@
+.const
+k_print = string "print"
+k_len = number 3
+k_idx0 = number 0
+k_idx1 = number 1
+k_idx2 = number 2
+k_idx_last = number -1
+k_v1 = number 10
+k_v2 = number 20
+k_v3 = number 30
+
+.chunk main 0 12
+LOADK 0 k_len
+NEWARRAY 1 0
+LOADK 2 k_idx0
+LOADK 3 k_v1
+SETARRAY 1 2 3
+LOADK 2 k_idx1
+LOADK 3 k_v2
+SETARRAY 1 2 3
+LOADK 2 k_idx2
+LOADK 3 k_v3
+SETARRAY 1 2 3
+LOADK 2 k_idx_last
+GETARRAY 4 1 2
+LEN 5 1
+GETGLOBAL 6 k_print
+MOVE 7 4
+CALL 6 1 0
+GETGLOBAL 6 k_print
+MOVE 7 5
+CALL 6 1 0
+RETURN 0 0

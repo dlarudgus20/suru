@@ -309,6 +309,71 @@ TEST(VmSmokeTest, LenOnString) {
     EXPECT_EQ(out.number_, 5.0);
 }
 
+TEST(VmSmokeTest, ArrayCreateReadWriteAndNegativeIndex) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(3.0));   // len
+    cu->constants_.push_back(suru::vm::Value::number(0.0));   // idx0
+    cu->constants_.push_back(suru::vm::Value::number(2.0));   // idx2
+    cu->constants_.push_back(suru::vm::Value::number(-1.0));  // idx -1
+    cu->constants_.push_back(suru::vm::Value::number(10.0));  // v10
+    cu->constants_.push_back(suru::vm::Value::number(20.0));  // v20
+
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 3, 4));
+    cu->code_.push_back(pack_abc(suru::vm::Op::SetArray, 1, 2, 3));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 2));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 3, 5));
+    cu->code_.push_back(pack_abc(suru::vm::Op::SetArray, 1, 2, 3));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 3));
+    cu->code_.push_back(pack_abc(suru::vm::Op::GetArray, 4, 1, 2));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Len, 5, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 4, 2));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 6, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 2));
+
+    ASSERT_GE(vm.stack_top(), 2U);
+    const suru::vm::Value len_out = vm.pop_value();
+    const suru::vm::Value value_out = vm.pop_value();
+    ASSERT_EQ(value_out.kind, suru::vm::ValueKind::Number);
+    ASSERT_EQ(len_out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(value_out.number_, 20.0);
+    EXPECT_EQ(len_out.number_, 3.0);
+}
+
+TEST(VmSmokeTest, ArrayIndexOutOfBoundsThrows) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(2.0));   // len
+    cu->constants_.push_back(suru::vm::Value::number(-3.0));  // oob negative
+
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::GetArray, 3, 1, 2));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 0));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 4, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_THROW(vm.call(0, 0), suru::vm::TypeError);
+}
+
 TEST(VmSmokeTest, ConcatAndLenRejectInvalidTypes) {
     {
         suru::vm::VM vm;
