@@ -10,5 +10,11 @@ if(BUILD_TESTING)
     add_test(NAME suru_bc_array_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/array.sura)
     add_test(NAME suru_bc_immediate_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/immediate.sura)
     add_test(NAME suru_bc_global_arrayi_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/global_arrayi.sura)
+    add_test(
+        NAME suru_bc_emit_sbc_test
+        COMMAND suru-bc -o ${CMAKE_BINARY_DIR}/tests_div.sbc ${CMAKE_SOURCE_DIR}/tests/div.sura
+    )
+    set_tests_properties(suru_bc_emit_sbc_test PROPERTIES FIXTURES_SETUP suru_bc_sbc_file)
+    add_test(NAME suru_bc_run_sbc_test COMMAND suru-bc ${CMAKE_BINARY_DIR}/tests_div.sbc)
+    set_tests_properties(suru_bc_run_sbc_test PROPERTIES FIXTURES_REQUIRED suru_bc_sbc_file)
 endif()
-

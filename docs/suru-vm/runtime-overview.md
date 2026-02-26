@@ -28,6 +28,7 @@ Opcode 인코딩/명령별 스택 동작은 `docs/suru-vm/bytecode.md`에서 다
 - `boolean`
 - `number`
 - `string`
+- `array`
 - `table`
 - `closure` (Suru bytecode closure, C closure 포함)
 

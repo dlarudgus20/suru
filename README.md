@@ -26,6 +26,8 @@ ctest --test-dir build --output-on-failure
 ## 빠른 실행 예시
 ```bash
 ./build/suru-bc/Debug/suru-bc.exe tests/div.sura
+./build/suru-bc/Debug/suru-bc.exe -o build/tests_div.sbc tests/div.sura
+./build/suru-bc/Debug/suru-bc.exe build/tests_div.sbc
 ./build/suru-bc/Debug/suru-bc.exe tests/upvalue.sura
 ctest --test-dir build -C Debug --output-on-failure
 ```

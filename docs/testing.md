@@ -11,9 +11,21 @@
 - `vm_smoke_test` (`libsuru-vm/tests/vm_smoke_test.cpp`)
   - 기본 바이트코드 실행 결과를 확인한다.
 - `suru_bc_upvalue_test` (`tests/upvalue.sura`)
-  - upvalue 캡처 및 `GET_UPVALUE`/`SET_UPVALUE` 실행 경로를 확인한다.
+  - upvalue 캡처 및 `GETUPVAL`/`SETUPVAL` 실행 경로를 확인한다.
 - `suru_bc_div_test` (`tests/div.sura`)
   - 표준 함수 `div(a, b)`의 다중 반환(몫/나머지) 처리를 확인한다.
+- `suru_bc_concat_len_test` (`tests/concat_len.sura`)
+  - `CONCAT`, `LEN` 동작과 문자열/숫자/불리언 조합을 확인한다.
+- `suru_bc_array_test` (`tests/array.sura`)
+  - 배열 생성/읽기/쓰기 및 음수 인덱스 동작을 확인한다.
+- `suru_bc_immediate_test` (`tests/immediate.sura`)
+  - immediate 규약(`RI[C]`, `RI[Bx]`)과 관련 opcode 경로를 확인한다.
+- `suru_bc_global_arrayi_test` (`tests/global_arrayi.sura`)
+  - `GETGLOBAL`/`SETGLOBAL` 및 `GETARRAYI`/`SETARRAYI` 경로를 확인한다.
+- `suru_bc_emit_sbc_test`
+  - `suru-bc -o`로 `.sbc` 파일 저장 경로를 확인한다.
+- `suru_bc_run_sbc_test`
+  - `.sbc` 입력 자동 감지 및 실행 경로를 확인한다.
 
 ## 실행 명령
 - 전체 테스트:

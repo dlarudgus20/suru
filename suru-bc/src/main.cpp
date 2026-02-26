@@ -1,9 +1,11 @@
 #include <cctype>
+#include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -23,10 +25,26 @@ constexpr std::uint32_t kOpShift = 26U;
 constexpr std::uint32_t kIShift = 25U;
 constexpr std::uint32_t kIMask = 0x1U;
 constexpr std::uint32_t kAxMask = 0x1FFFFFFU;
+constexpr std::uint32_t kSbcMagic = 0x43425300U; // "\0SBC" in little-endian bytes
+constexpr std::uint32_t kSbcVersion = 1U;
+
+struct CompiledUnit {
+    suru::vm::CodeUnit* code {nullptr};
+    std::uint32_t entry_chunk_index {0};
+};
+
+struct CliOptions {
+    std::filesystem::path input;
+    std::optional<std::filesystem::path> output;
+};
 
 struct AsmError : std::runtime_error {
     int line;
     AsmError(int line, std::string message) : std::runtime_error(std::move(message)), line(line) {}
+};
+
+struct CliError : std::runtime_error {
+    using std::runtime_error::runtime_error;
 };
 
 std::string_view runtime_error_category_name(suru::vm::RuntimeErrorCategory category) {
@@ -632,9 +650,137 @@ std::string read_text_file(const std::filesystem::path& path) {
     return ss.str();
 }
 
+std::vector<std::uint8_t> read_binary_file(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("failed to open file: " + path.string());
+    }
+    input.seekg(0, std::ios::end);
+    const std::streamoff size = input.tellg();
+    input.seekg(0, std::ios::beg);
+    if (size < 0) {
+        throw std::runtime_error("failed to read file size: " + path.string());
+    }
+    std::vector<std::uint8_t> out(static_cast<std::size_t>(size));
+    if (size > 0) {
+        input.read(reinterpret_cast<char*>(out.data()), size);
+        if (!input) {
+            throw std::runtime_error("failed to read file: " + path.string());
+        }
+    }
+    return out;
+}
+
+void write_binary_file(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        throw std::runtime_error("failed to open output file: " + path.string());
+    }
+    if (!bytes.empty()) {
+        output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        if (!output) {
+            throw std::runtime_error("failed to write output file: " + path.string());
+        }
+    }
+}
+
+bool starts_with_sbc_magic(const std::vector<std::uint8_t>& bytes) {
+    return bytes.size() >= 4
+        && bytes[0] == 0x00
+        && bytes[1] == 0x53
+        && bytes[2] == 0x42
+        && bytes[3] == 0x43;
+}
+
+void append_u8(std::vector<std::uint8_t>& out, std::uint8_t value) {
+    out.push_back(value);
+}
+
+void append_u16(std::vector<std::uint8_t>& out, std::uint16_t value) {
+    out.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xFFU));
+}
+
+void append_u32(std::vector<std::uint8_t>& out, std::uint32_t value) {
+    out.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((value >> 16U) & 0xFFU));
+    out.push_back(static_cast<std::uint8_t>((value >> 24U) & 0xFFU));
+}
+
+void append_u64(std::vector<std::uint8_t>& out, std::uint64_t value) {
+    for (int i = 0; i < 8; ++i) {
+        out.push_back(static_cast<std::uint8_t>((value >> (i * 8)) & 0xFFU));
+    }
+}
+
+void append_f64(std::vector<std::uint8_t>& out, double value) {
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    append_u64(out, bits);
+}
+
+void append_string(std::vector<std::uint8_t>& out, std::string_view value) {
+    append_u32(out, static_cast<std::uint32_t>(value.size()));
+    out.insert(out.end(), value.begin(), value.end());
+}
+
+struct BinaryReader {
+    const std::vector<std::uint8_t>& bytes;
+    std::size_t pos {0};
+
+    std::uint8_t read_u8() {
+        if (pos + 1 > bytes.size()) {
+            throw std::runtime_error("unexpected end of file");
+        }
+        return bytes[pos++];
+    }
+
+    std::uint16_t read_u16() {
+        const std::uint16_t b0 = read_u8();
+        const std::uint16_t b1 = read_u8();
+        return static_cast<std::uint16_t>(b0 | (b1 << 8U));
+    }
+
+    std::uint32_t read_u32() {
+        const std::uint32_t b0 = read_u8();
+        const std::uint32_t b1 = read_u8();
+        const std::uint32_t b2 = read_u8();
+        const std::uint32_t b3 = read_u8();
+        return b0 | (b1 << 8U) | (b2 << 16U) | (b3 << 24U);
+    }
+
+    std::uint64_t read_u64() {
+        std::uint64_t value = 0;
+        for (int i = 0; i < 8; ++i) {
+            value |= (static_cast<std::uint64_t>(read_u8()) << (i * 8));
+        }
+        return value;
+    }
+
+    double read_f64() {
+        const std::uint64_t bits = read_u64();
+        double value = 0.0;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    }
+
+    std::string read_string() {
+        const std::uint32_t len = read_u32();
+        if (pos + len > bytes.size()) {
+            throw std::runtime_error("unexpected end of file");
+        }
+        std::string out(reinterpret_cast<const char*>(bytes.data() + pos), len);
+        pos += len;
+        return out;
+    }
+};
+
 void print_help(std::ostream& out) {
     out << "Usage:\n"
         << "  suru-bc <file.sura>\n"
+        << "  suru-bc <file.sbc>\n"
+        << "  suru-bc -o <out.sbc> <file.sura>\n"
         << "\n"
         << "Assembly format:\n"
         << "  .const\n"
@@ -652,10 +798,7 @@ void print_help(std::ostream& out) {
         << "    RETURN 0 1\n";
 }
 
-int run_file(const std::filesystem::path& path) {
-    suru::vm::VM vm;
-    suru::lib::load_libs(vm);
-
+CompiledUnit assemble_file(suru::vm::VM& vm, const std::filesystem::path& path) {
     Section section = Section::None;
     std::vector<ConstDef> const_defs;
     std::unordered_map<std::string, std::uint32_t> const_index;
@@ -744,14 +887,8 @@ int run_file(const std::filesystem::path& path) {
             } else if (parts[0] == "string") {
                 const std::string quoted = trim(rhs.substr(std::string("string").size()));
                 value = suru::vm::Value::string(vm.make_string(unquote(quoted, line_no)));
-            } else if (parts[0] == "nil") {
-                value = suru::vm::Value::nil();
-            } else if (parts[0] == "true") {
-                value = suru::vm::Value::boolean(true);
-            } else if (parts[0] == "false") {
-                value = suru::vm::Value::boolean(false);
             } else {
-                throw AsmError(line_no, "unknown constant type: " + parts[0]);
+                throw AsmError(line_no, "constant type is not supported: " + parts[0]);
             }
 
             const_index.emplace(name, checked_u32(const_defs.size(), line_no, "constant index"));
@@ -878,29 +1015,215 @@ int run_file(const std::filesystem::path& path) {
         });
     }
 
-    const std::uint32_t main_index = chunk_index.at("main");
-    suru::vm::Closure* entry = vm.make_closure(cu, main_index);
+    return CompiledUnit {cu, chunk_index.at("main")};
+}
+
+void write_sbc_file(const std::filesystem::path& path, const CompiledUnit& unit) {
+    if (unit.code == nullptr) {
+        throw std::runtime_error("cannot write sbc: null code unit");
+    }
+
+    std::vector<std::uint8_t> out;
+    out.reserve(64 + unit.code->constants_.size() * 16 + unit.code->code_.size() * 4);
+
+    append_u32(out, kSbcMagic);
+    append_u32(out, kSbcVersion);
+    append_u32(out, static_cast<std::uint32_t>(unit.code->constants_.size()));
+    append_u32(out, static_cast<std::uint32_t>(unit.code->chunks_.size()));
+    append_u32(out, static_cast<std::uint32_t>(unit.code->code_.size()));
+    append_u32(out, unit.entry_chunk_index);
+
+    for (const suru::vm::Value constant : unit.code->constants_) {
+        if (constant.kind == suru::vm::ValueKind::Number) {
+            append_u8(out, 1U);
+            append_f64(out, constant.number_);
+            continue;
+        }
+        if (constant.kind == suru::vm::ValueKind::String) {
+            append_u8(out, 2U);
+            append_string(out, constant.as_string("sbc write")->view());
+            continue;
+        }
+        throw std::runtime_error("unsupported constant kind for sbc");
+    }
+
+    for (const suru::vm::Chunk& chunk : unit.code->chunks_) {
+        append_string(out, chunk.name);
+        append_u32(out, chunk.code_begin);
+        append_u32(out, chunk.code_end);
+        append_u8(out, chunk.arity);
+        append_u8(out, chunk.slots);
+        append_u16(out, static_cast<std::uint16_t>(chunk.upvalue_infos.size()));
+        for (const suru::vm::UpvalueInfo info : chunk.upvalue_infos) {
+            append_u8(out, static_cast<std::uint8_t>(info.source));
+            append_u8(out, info.index);
+        }
+    }
+
+    for (const std::uint32_t word : unit.code->code_) {
+        append_u32(out, word);
+    }
+
+    write_binary_file(path, out);
+}
+
+CompiledUnit load_sbc_file(suru::vm::VM& vm, const std::filesystem::path& path) {
+    const std::vector<std::uint8_t> bytes = read_binary_file(path);
+    BinaryReader rd {bytes, 0};
+
+    const std::uint32_t magic = rd.read_u32();
+    if (magic != kSbcMagic) {
+        throw std::runtime_error("invalid sbc magic");
+    }
+    const std::uint32_t version = rd.read_u32();
+    if (version != kSbcVersion) {
+        throw std::runtime_error("unsupported sbc version");
+    }
+
+    const std::uint32_t const_count = rd.read_u32();
+    const std::uint32_t chunk_count = rd.read_u32();
+    const std::uint32_t code_word_count = rd.read_u32();
+    const std::uint32_t entry_chunk_index = rd.read_u32();
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    cu->constants_.clear();
+    cu->constants_.reserve(const_count);
+    for (std::uint32_t i = 0; i < const_count; ++i) {
+        const std::uint8_t tag = rd.read_u8();
+        if (tag == 1U) {
+            cu->constants_.push_back(suru::vm::Value::number(rd.read_f64()));
+            continue;
+        }
+        if (tag == 2U) {
+            const std::string value = rd.read_string();
+            cu->constants_.push_back(suru::vm::Value::string(vm.make_string(value)));
+            continue;
+        }
+        throw std::runtime_error("unsupported sbc constant tag");
+    }
+
+    cu->chunks_.clear();
+    cu->chunks_.reserve(chunk_count);
+    for (std::uint32_t i = 0; i < chunk_count; ++i) {
+        suru::vm::Chunk chunk;
+        chunk.name = rd.read_string();
+        chunk.code_begin = rd.read_u32();
+        chunk.code_end = rd.read_u32();
+        chunk.arity = rd.read_u8();
+        chunk.slots = rd.read_u8();
+        const std::uint16_t upvalue_count = rd.read_u16();
+        chunk.upvalue_infos.clear();
+        chunk.upvalue_infos.reserve(upvalue_count);
+        for (std::uint16_t j = 0; j < upvalue_count; ++j) {
+            const std::uint8_t source = rd.read_u8();
+            const std::uint8_t index = rd.read_u8();
+            if (source > 1U) {
+                throw std::runtime_error("invalid upvalue source");
+            }
+            chunk.upvalue_infos.push_back(
+                suru::vm::UpvalueInfo {
+                    static_cast<suru::vm::UpvalueSource>(source),
+                    index,
+                }
+            );
+        }
+        cu->chunks_.push_back(std::move(chunk));
+    }
+
+    cu->code_.clear();
+    cu->code_.reserve(code_word_count);
+    for (std::uint32_t i = 0; i < code_word_count; ++i) {
+        cu->code_.push_back(rd.read_u32());
+    }
+
+    if (rd.pos != bytes.size()) {
+        throw std::runtime_error("extra trailing bytes in sbc");
+    }
+    if (entry_chunk_index >= cu->chunks_.size()) {
+        throw std::runtime_error("entry chunk index out of bounds");
+    }
+    for (const suru::vm::Chunk& chunk : cu->chunks_) {
+        if (chunk.arity > chunk.slots) {
+            throw std::runtime_error("chunk arity exceeds slots");
+        }
+        if (chunk.code_begin > chunk.code_end || chunk.code_end > code_word_count) {
+            throw std::runtime_error("chunk code range out of bounds");
+        }
+    }
+
+    return CompiledUnit {cu, entry_chunk_index};
+}
+
+void run_compiled_unit(suru::vm::VM& vm, const CompiledUnit& unit) {
+    if (unit.code == nullptr) {
+        throw std::runtime_error("cannot execute null code unit");
+    }
+    if (unit.entry_chunk_index >= unit.code->chunks_.size()) {
+        throw std::runtime_error("entry chunk index out of bounds");
+    }
+    suru::vm::Closure* entry = vm.make_closure(unit.code, unit.entry_chunk_index);
     vm.push_value(suru::vm::Value::closure(entry));
     vm.call(0, 0);
-    return 0;
+}
+
+bool input_is_sbc(const std::filesystem::path& path) {
+    const std::vector<std::uint8_t> bytes = read_binary_file(path);
+    return starts_with_sbc_magic(bytes);
+}
+
+CliOptions parse_cli(int argc, char** argv) {
+    CliOptions options;
+    if (argc == 2) {
+        options.input = argv[1];
+        return options;
+    }
+    if (argc == 4 && std::string_view(argv[1]) == "-o") {
+        options.output = argv[2];
+        options.input = argv[3];
+        return options;
+    }
+    throw CliError("invalid arguments");
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
+    std::string input_for_error = "<input>";
     try {
-        if (argc != 2 || std::string_view(argv[1]) == "--help" || std::string_view(argv[1]) == "-h") {
+        if (argc == 2 && (std::string_view(argv[1]) == "--help" || std::string_view(argv[1]) == "-h")) {
             print_help(std::cout);
-            return argc == 2 ? 0 : 1;
+            return 0;
         }
 
-        return run_file(argv[1]);
+        const CliOptions options = parse_cli(argc, argv);
+        input_for_error = options.input.string();
+
+        suru::vm::VM vm;
+        suru::lib::load_libs(vm);
+
+        const bool is_sbc = input_is_sbc(options.input);
+        if (options.output.has_value()) {
+            if (is_sbc) {
+                throw std::runtime_error("-o is only supported for assembly input");
+            }
+            const CompiledUnit unit = assemble_file(vm, options.input);
+            write_sbc_file(*options.output, unit);
+            return 0;
+        }
+
+        const CompiledUnit unit = is_sbc ? load_sbc_file(vm, options.input) : assemble_file(vm, options.input);
+        run_compiled_unit(vm, unit);
+        return 0;
     } catch (const AsmError& e) {
         if (e.line > 0) {
-            std::cerr << argv[1] << ':' << e.line << ": error: " << e.what() << '\n';
+            std::cerr << input_for_error << ':' << e.line << ": error: " << e.what() << '\n';
         } else {
             std::cerr << "error: " << e.what() << '\n';
         }
+        return 1;
+    } catch (const CliError& e) {
+        print_help(std::cerr);
+        std::cerr << "error: " << e.what() << '\n';
         return 1;
     } catch (const suru::vm::RuntimeError& e) {
         std::cerr << "runtime error [" << runtime_error_category_name(e.category()) << "]: " << e.what() << '\n';

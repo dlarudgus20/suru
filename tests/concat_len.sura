@@ -2,13 +2,12 @@
 k_print = string "print"
 k_a = string "ab"
 k_n = number 12
-k_b = true
 
 .chunk main 0 8
 LOADK 0 k_a
 LOADK 1 k_n
 CONCAT 2 0 1
-LOADK 3 k_b
+LOADTRUE 3
 CONCAT 4 2 3
 LEN 5 4
 GETGLOBALK k_print 6

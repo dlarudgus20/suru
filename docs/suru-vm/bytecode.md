@@ -71,6 +71,7 @@
 - 섹션
   - `.const`
   - `.chunk <name> <arity> <slots>`
+- `.const` 항목 타입은 `number`, `string`만 허용
 - chunk 내부 지시어
   - `.upvalue local <index>`
   - `.upvalue upvalue <index>`
@@ -139,4 +140,3 @@ RETURN 0 1
 | CLOSURE | ABx | `A Bx` | `R[A] = closure(Bx)` |
 | GETUPVAL | ABx | `A Bx` | `R[Bx] = U[A]` |
 | SETUPVAL | ABx | `A Bx` | `U[A] = RI[Bx]` |
-
