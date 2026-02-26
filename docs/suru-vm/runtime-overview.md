@@ -44,5 +44,5 @@ Opcode 인코딩/명령별 스택 동작은 `docs/suru-vm/bytecode.md`에서 다
 
 ## 관련 문서
 - 바이트코드 포맷/명령 상세: `docs/suru-vm/bytecode.md`
-- 상태 모델 보충: `docs/suru-vm/runtime-state-model.md`
+- VM 동작 설명: `docs/suru-vm/vm-behavior.md`
 - 오류 분류 보충: `docs/suru-vm/runtime-errors.md`

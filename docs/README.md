@@ -5,7 +5,7 @@
 - `docs/suru/language-spec.md`: 언어 의미/동작 규약
 - `docs/suru-vm/runtime-overview.md`: VM 런타임 구성과 실행 흐름 개요
 - `docs/suru-vm/bytecode.md`: 바이트코드 포맷, opcode 동작, 스택/슬롯 규약
-- `docs/suru-vm/runtime-state-model.md`: 런타임 상태 모델 보충 문서
+- `docs/suru-vm/vm-behavior.md`: VM 동작 설명 문서
 - `docs/suru-vm/runtime-errors.md`: 런타임 오류 분류/진단 보충 문서
 - `tests/upvalue.sura`: upvalue 캡처/읽기/쓰기 어셈블리 예제 테스트
 - `tests/div.sura`: 표준 함수 `div(a, b)` 다중 반환(몫/나머지) 어셈블리 예제 테스트

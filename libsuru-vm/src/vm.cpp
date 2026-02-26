@@ -98,11 +98,11 @@ Value VM::pop_value() {
     if (i_stack_.empty()) {
         throw InternalError("call frame is not available");
     }
-    if (v_stack_.size() <= i_stack_.back().base) {
-        throw InternalError("frame stack underflow");
-    }
     if (v_stack_.empty()) {
         throw ApiError("stack underflow");
+    }
+    if (v_stack_.size() <= i_stack_.back().base) {
+        throw InternalError("frame stack underflow");
     }
     Value out = v_stack_.back();
     v_stack_.pop_back();

@@ -5,7 +5,7 @@
 - `ApiError`: VM C++ API 사용 오류
 - `TableError`: 테이블 키/값 접근 또는 갱신 실패
 - `InvalidCodeError`: 바이트코드 자체가 유효하지 않음(레지스터/점프/상수 인덱스 등)
-- `InvalidImageError`: CodeUnit/Chunk 메타데이터가 유효하지 않음
+- `InvalidImageError`: `CodeUnit`/`Chunk` 메타데이터가 유효하지 않음
 - `StackOverflowError`: VM 내부 인덱스(`uint32_t`) 범위를 넘는 스택/프레임 크기
 - `InternalError`: VM 내부 불변식 위반 또는 비정상 상태
 
