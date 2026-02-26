@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -70,6 +71,19 @@ WordSAx decode_sax(std::uint32_t word) {
         return WordSAx {static_cast<std::int32_t>(raw)};
     }
     return WordSAx {static_cast<std::int32_t>(raw | (~kAxMask))};
+}
+
+std::string concat_operand_to_string(Value value) {
+    switch (value.kind) {
+        case ValueKind::String: return std::string(value.as_string("concat")->view());
+        case ValueKind::Number: {
+            std::ostringstream oss;
+            oss << value.number_;
+            return oss.str();
+        }
+        case ValueKind::Boolean: return value.bool_ ? "true" : "false";
+        default: throw TypeError("concat: expected string/number/boolean");
+    }
 }
 
 } // namespace
@@ -371,6 +385,13 @@ void VM::run(std::size_t target_depth) {
                 ));
                 break;
             }
+            case Op::Concat: {
+                const auto [a, b, c] = decode_abc(word);
+                const std::string lhs = concat_operand_to_string(reg_read(b));
+                const std::string rhs = concat_operand_to_string(reg_read(c));
+                reg_write(a, Value::string(make_string(lhs + rhs)));
+                break;
+            }
             case Op::Eq: {
                 const auto [a, b, c] = decode_abc(word);
                 reg_write(a, Value::boolean(
@@ -480,6 +501,12 @@ void VM::run(std::size_t target_depth) {
             case Op::Not: {
                 const auto [a, b] = decode_abx(word);
                 reg_write(a, Value::boolean(reg_read(b).is_falsy()));
+                break;
+            }
+            case Op::Len: {
+                const auto [a, b] = decode_abx(word);
+                const String* str = reg_read(b).as_string("len");
+                reg_write(a, Value::number(static_cast<double>(str->len)));
                 break;
             }
             case Op::NewTable: {

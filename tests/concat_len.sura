@@ -1,0 +1,20 @@
+.const
+k_print = string "print"
+k_a = string "ab"
+k_n = number 12
+k_b = true
+
+.chunk main 0 8
+LOADK 0 k_a
+LOADK 1 k_n
+CONCAT 2 0 1
+LOADK 3 k_b
+CONCAT 4 2 3
+LEN 5 4
+GETGLOBAL 6 k_print
+MOVE 7 4
+CALL 6 1 0
+GETGLOBAL 6 k_print
+MOVE 7 5
+CALL 6 1 0
+RETURN 0 0

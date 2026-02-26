@@ -214,8 +214,10 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"IDIV", suru::vm::Op::Idiv},
         {"MOD", suru::vm::Op::Mod},
         {"POW", suru::vm::Op::Pow},
+        {"CONCAT", suru::vm::Op::Concat},
         {"NEG", suru::vm::Op::Neg},
         {"NOT", suru::vm::Op::Not},
+        {"LEN", suru::vm::Op::Len},
         {"AND", suru::vm::Op::And},
         {"OR", suru::vm::Op::Or},
         {"EQ", suru::vm::Op::Eq},
@@ -287,7 +289,8 @@ std::uint32_t emit_word(
     switch (op) {
         case suru::vm::Op::Move:
         case suru::vm::Op::Neg:
-        case suru::vm::Op::Not: {
+        case suru::vm::Op::Not:
+        case suru::vm::Op::Len: {
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
@@ -350,6 +353,7 @@ std::uint32_t emit_word(
         case suru::vm::Op::Idiv:
         case suru::vm::Op::Mod:
         case suru::vm::Op::Pow:
+        case suru::vm::Op::Concat:
         case suru::vm::Op::And:
         case suru::vm::Op::Or:
         case suru::vm::Op::Eq:

@@ -248,3 +248,105 @@ TEST(VmSmokeTest, EvaluatesBooleanAndOrOpcodes) {
     EXPECT_FALSE(first.bool_);
     EXPECT_TRUE(second.bool_);
 }
+
+TEST(VmSmokeTest, ConcatsStringNumberBoolean) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    suru::vm::String* hello = vm.make_string("hello");
+    ASSERT_NE(hello, nullptr);
+    cu->constants_.push_back(suru::vm::Value::string(hello));
+    cu->constants_.push_back(suru::vm::Value::number(1.0));
+    cu->constants_.push_back(suru::vm::Value::boolean(true));
+
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Concat, 2, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 3, 2));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Concat, 4, 2, 3));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 4, 1));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 5, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    ASSERT_EQ(out.kind, suru::vm::ValueKind::String);
+    ASSERT_NE(out.string_, nullptr);
+    EXPECT_EQ(out.string_->view(), "hello1true");
+}
+
+TEST(VmSmokeTest, LenOnString) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    suru::vm::String* hello = vm.make_string("hello");
+    ASSERT_NE(hello, nullptr);
+    cu->constants_.push_back(suru::vm::Value::string(hello));
+
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Len, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 1, 1));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 2, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    ASSERT_EQ(out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(out.number_, 5.0);
+}
+
+TEST(VmSmokeTest, ConcatAndLenRejectInvalidTypes) {
+    {
+        suru::vm::VM vm;
+        suru::vm::CodeUnit* concat_cu = vm.make_code_unit();
+        ASSERT_NE(concat_cu, nullptr);
+        concat_cu->constants_.push_back(suru::vm::Value::table(vm.make_table()));
+        concat_cu->constants_.push_back(suru::vm::Value::number(1.0));
+
+        const std::uint32_t concat_begin = to_u32(concat_cu->code_.size());
+        concat_cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+        concat_cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 1));
+        concat_cu->code_.push_back(pack_abc(suru::vm::Op::Concat, 2, 0, 1));
+        concat_cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 0));
+        const std::uint32_t concat_end = to_u32(concat_cu->code_.size());
+        concat_cu->chunks_.push_back(suru::vm::Chunk {"main", concat_begin, concat_end, 0, 3, {}});
+
+        suru::vm::Closure* concat_entry = vm.make_closure(concat_cu, 0);
+        ASSERT_NE(concat_entry, nullptr);
+        vm.push_value(suru::vm::Value::closure(concat_entry));
+        EXPECT_THROW(vm.call(0, 0), suru::vm::TypeError);
+    }
+
+    {
+        suru::vm::VM vm;
+        suru::vm::CodeUnit* len_cu = vm.make_code_unit();
+        ASSERT_NE(len_cu, nullptr);
+        len_cu->constants_.push_back(suru::vm::Value::number(3.0));
+
+        const std::uint32_t len_begin = to_u32(len_cu->code_.size());
+        len_cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+        len_cu->code_.push_back(pack_abx(suru::vm::Op::Len, 1, 0));
+        len_cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 0));
+        const std::uint32_t len_end = to_u32(len_cu->code_.size());
+        len_cu->chunks_.push_back(suru::vm::Chunk {"main", len_begin, len_end, 0, 2, {}});
+
+        suru::vm::Closure* len_entry = vm.make_closure(len_cu, 0);
+        ASSERT_NE(len_entry, nullptr);
+        vm.push_value(suru::vm::Value::closure(len_entry));
+        EXPECT_THROW(vm.call(0, 0), suru::vm::TypeError);
+    }
+}

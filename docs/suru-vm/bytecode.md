@@ -28,6 +28,16 @@
   - 부족한 인자: `nil`로 채움
   - 초과한 인자: 무시
 
+## 문자열 연산 규약
+- `CONCAT A B C`
+  - `R[B]`, `R[C]`를 문자열로 변환해 이어 붙이고 `R[A]`에 저장한다.
+  - 허용 타입: `string`, `number`, `boolean`
+  - 변환 규칙: `boolean`은 `true`/`false` 문자열
+  - 그 외 타입은 `TypeError("concat: expected string/number/boolean")`
+- `LEN A B`
+  - `R[B]`가 `string`일 때 바이트 길이를 `number`로 `R[A]`에 저장한다.
+  - `string`이 아니면 `TypeError("len: expected string")`
+
 ## 업밸류 캡처 규약
 `Chunk`는 `upvalue_infos`를 가진다. 각 항목은 `{ source, index }`다.
 - `source = local`: 현재 프레임의 `R[index]`를 캡처
@@ -74,7 +84,9 @@ RETURN 0 1
 | GETGLOBAL | ABx | `A K` | `R[A] = globals[constants[K]]` |
 | SETGLOBAL | ABx | `K A` | `globals[constants[K]] = R[A]` |
 | ADD/SUB/MUL/DIV/IDIV/MOD/POW | ABC | `A B C` | 산술 연산 |
+| CONCAT | ABC | `A B C` | 문자열 연결(`string/number/boolean` 허용) |
 | NEG / NOT | ABx | `A B` | 단항 연산 |
+| LEN | ABx | `A B` | 문자열 길이(바이트) |
 | AND / OR | ABC | `A B C` | bool 논리 연산 |
 | EQ/NE/LT/LE/GT/GE | ABC | `A B C` | 비교 결과(bool) 저장 |
 | BAND/BOR/BXOR/SHL/SHR | ABC | `A B C` | 비트 연산 |
@@ -89,3 +101,6 @@ RETURN 0 1
 | CLOSURE | ABx | `A chunk` | 클로저 생성 및 저장 |
 | GETUPVAL | ABx | `A U` | `R[A] = upvalue[U]` |
 | SETUPVAL | ABx | `U A` | `upvalue[U] = R[A]` |
+
+## TODO
+- 배열/시퀀스 타입이 도입되면 `LEN`에 배열 길이 규칙을 추가한다.
