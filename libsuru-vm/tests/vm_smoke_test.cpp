@@ -31,7 +31,7 @@ TEST(VmSmokeTest, LoadsStdPrintIntoGlobals) {
     suru::vm::VM vm;
     suru::lib::load_libs(vm);
 
-    suru::vm::String* print_name = vm.load_string("print");
+    suru::vm::String* print_name = vm.make_string("print");
     ASSERT_NE(print_name, nullptr);
 
     suru::vm::Value print_value = suru::vm::Value::nil();
@@ -48,7 +48,7 @@ TEST(VmSmokeTest, LoadsStdModulesAndFunctions) {
 
     auto expect_global_closure = [&](std::string_view name) {
         suru::vm::Value out = suru::vm::Value::nil();
-        ASSERT_TRUE(vm.globals()->get(suru::vm::Value::string(vm.load_string(name)), &out));
+        ASSERT_TRUE(vm.globals()->get(suru::vm::Value::string(vm.make_string(name)), &out));
         ASSERT_EQ(out.kind, suru::vm::ValueKind::Closure);
         ASSERT_NE(out.closure_, nullptr);
         ASSERT_NE(out.closure_->cfunc, nullptr);
@@ -56,12 +56,12 @@ TEST(VmSmokeTest, LoadsStdModulesAndFunctions) {
 
     auto expect_module_closure = [&](std::string_view mod_name, std::string_view fn_name) {
         suru::vm::Value mod = suru::vm::Value::nil();
-        ASSERT_TRUE(vm.globals()->get(suru::vm::Value::string(vm.load_string(mod_name)), &mod));
+        ASSERT_TRUE(vm.globals()->get(suru::vm::Value::string(vm.make_string(mod_name)), &mod));
         ASSERT_EQ(mod.kind, suru::vm::ValueKind::Table);
         ASSERT_NE(mod.table_, nullptr);
 
         suru::vm::Value fn = suru::vm::Value::nil();
-        ASSERT_TRUE(mod.table_->get(suru::vm::Value::string(vm.load_string(fn_name)), &fn));
+        ASSERT_TRUE(mod.table_->get(suru::vm::Value::string(vm.make_string(fn_name)), &fn));
         ASSERT_EQ(fn.kind, suru::vm::ValueKind::Closure);
         ASSERT_NE(fn.closure_, nullptr);
         ASSERT_NE(fn.closure_->cfunc, nullptr);
@@ -86,8 +86,8 @@ TEST(VmSmokeTest, LoadsStdModulesAndFunctions) {
 TEST(VmSmokeTest, InternsStrings) {
     suru::vm::VM vm;
 
-    suru::vm::String* s1 = vm.load_string("alpha");
-    suru::vm::String* s2 = vm.load_string("alpha");
+    suru::vm::String* s1 = vm.make_string("alpha");
+    suru::vm::String* s2 = vm.make_string("alpha");
     ASSERT_NE(s1, nullptr);
     ASSERT_NE(s2, nullptr);
     EXPECT_EQ(s1, s2);
@@ -96,10 +96,10 @@ TEST(VmSmokeTest, InternsStrings) {
 TEST(VmSmokeTest, SupportsTableCrud) {
     suru::vm::VM vm;
 
-    suru::vm::Table* t = vm.load_table();
+    suru::vm::Table* t = vm.make_table();
     ASSERT_NE(t, nullptr);
 
-    suru::vm::String* key_str = vm.load_string("k");
+    suru::vm::String* key_str = vm.make_string("k");
     ASSERT_NE(key_str, nullptr);
 
     suru::vm::Value key = suru::vm::Value::string(key_str);
@@ -121,7 +121,7 @@ TEST(VmSmokeTest, InjectsAndReadsGlobalValuesThroughGlobalTable) {
     suru::vm::Table* g = vm.globals();
     ASSERT_NE(g, nullptr);
 
-    suru::vm::String* key_str = vm.load_string("answer");
+    suru::vm::String* key_str = vm.make_string("answer");
     ASSERT_NE(key_str, nullptr);
 
     suru::vm::Value key = suru::vm::Value::string(key_str);
@@ -136,7 +136,7 @@ TEST(VmSmokeTest, InjectsAndReadsGlobalValuesThroughGlobalTable) {
 TEST(VmSmokeTest, UsesConfiguredKeyEqualityRules) {
     suru::vm::VM vm;
 
-    suru::vm::Table* t = vm.load_table();
+    suru::vm::Table* t = vm.make_table();
     ASSERT_NE(t, nullptr);
 
     suru::vm::Value key = suru::vm::Value::number(1.0);
@@ -147,8 +147,8 @@ TEST(VmSmokeTest, UsesConfiguredKeyEqualityRules) {
     EXPECT_EQ(out.kind, suru::vm::ValueKind::Boolean);
     EXPECT_TRUE(out.bool_);
 
-    suru::vm::Table* key_table_1 = vm.load_table();
-    suru::vm::Table* key_table_2 = vm.load_table();
+    suru::vm::Table* key_table_1 = vm.make_table();
+    suru::vm::Table* key_table_2 = vm.make_table();
     ASSERT_NE(key_table_1, nullptr);
     ASSERT_NE(key_table_2, nullptr);
     EXPECT_TRUE(t->set(suru::vm::Value::table(key_table_1), suru::vm::Value::number(7.0)));
@@ -160,7 +160,7 @@ TEST(VmSmokeTest, CreatesClosureWithInitializedSlots) {
 
     suru::vm::CFunction func = [](auto vm, auto self) {};
 
-    suru::vm::Closure* closure = vm.load_closure_c(func, 3);
+    suru::vm::Closure* closure = vm.make_closure_c(func, 3);
     ASSERT_NE(closure, nullptr);
     EXPECT_EQ(closure->cfunc, func);
     EXPECT_EQ(closure->len, 3U);
@@ -177,10 +177,10 @@ TEST(VmSmokeTest, CreatesClosureWithInitializedSlots) {
 TEST(VmSmokeTest, ExecutesBytecodeAndWritesGlobal) {
     suru::vm::VM vm;
 
-    suru::vm::CodeUnit* cu = vm.load_code_unit();
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
     ASSERT_NE(cu, nullptr);
 
-    suru::vm::String* key_name = vm.load_string("answer");
+    suru::vm::String* key_name = vm.make_string("answer");
     ASSERT_NE(key_name, nullptr);
 
     cu->constants_.push_back(suru::vm::Value::number(42.0));
@@ -195,11 +195,11 @@ TEST(VmSmokeTest, ExecutesBytecodeAndWritesGlobal) {
 
     cu->chunks_.push_back(suru::vm::Chunk {"main", 0, cu->opcodes_.size(), 0, 4, 0});
 
-    suru::vm::Closure* closure = vm.load_closure(cu, 0, 0);
+    suru::vm::Closure* closure = vm.make_closure(cu, 0, 0);
     ASSERT_NE(closure, nullptr);
 
     vm.push_value(suru::vm::Value::closure(closure));
-    EXPECT_NO_THROW(vm.exec_call());
+    EXPECT_NO_THROW(vm.call(0, 0));
 
     suru::vm::Value out = suru::vm::Value::nil();
     EXPECT_TRUE(vm.globals()->get(suru::vm::Value::string(key_name), &out));
@@ -210,7 +210,7 @@ TEST(VmSmokeTest, ExecutesBytecodeAndWritesGlobal) {
 TEST(VmSmokeTest, CallsChunkClosureAndReturnsValue) {
     suru::vm::VM vm;
 
-    suru::vm::CodeUnit* cu = vm.load_code_unit();
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
     ASSERT_NE(cu, nullptr);
     cu->constants_.push_back(suru::vm::Value::number(7.0));
 
@@ -234,10 +234,10 @@ TEST(VmSmokeTest, CallsChunkClosureAndReturnsValue) {
     cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 4, 0});
     cu->chunks_.push_back(suru::vm::Chunk {"foo", foo_begin, foo_end, 0, 2, 0});
 
-    suru::vm::Closure* entry = vm.load_closure(cu, 0, 0);
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
     ASSERT_NE(entry, nullptr);
     vm.push_value(suru::vm::Value::closure(entry));
-    EXPECT_NO_THROW(vm.exec_call());
+    EXPECT_NO_THROW(vm.call(0, 1));
 
     ASSERT_GE(vm.stack_top(), 1U);
     suru::vm::Value out = vm.pop_value();
@@ -248,7 +248,7 @@ TEST(VmSmokeTest, CallsChunkClosureAndReturnsValue) {
 TEST(VmSmokeTest, PadsMissingArgsWithNilByArity) {
     suru::vm::VM vm;
 
-    suru::vm::CodeUnit* cu = vm.load_code_unit();
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
     ASSERT_NE(cu, nullptr);
     cu->constants_.push_back(suru::vm::Value::number(7.0));
 
@@ -276,10 +276,10 @@ TEST(VmSmokeTest, PadsMissingArgsWithNilByArity) {
     cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 4, 0});
     cu->chunks_.push_back(suru::vm::Chunk {"foo", foo_begin, foo_end, 2, 2, 0});
 
-    suru::vm::Closure* entry = vm.load_closure(cu, 0, 0);
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
     ASSERT_NE(entry, nullptr);
     vm.push_value(suru::vm::Value::closure(entry));
-    EXPECT_NO_THROW(vm.exec_call());
+    EXPECT_NO_THROW(vm.call(0, 2));
 
     ASSERT_GE(vm.stack_top(), 2U);
     suru::vm::Value second = vm.pop_value();
@@ -292,7 +292,7 @@ TEST(VmSmokeTest, PadsMissingArgsWithNilByArity) {
 TEST(VmSmokeTest, TruncatesExtraArgsByArity) {
     suru::vm::VM vm;
 
-    suru::vm::CodeUnit* cu = vm.load_code_unit();
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
     ASSERT_NE(cu, nullptr);
     cu->constants_.push_back(suru::vm::Value::number(10.0));
     cu->constants_.push_back(suru::vm::Value::number(20.0));
@@ -324,13 +324,14 @@ TEST(VmSmokeTest, TruncatesExtraArgsByArity) {
     cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 6, 0});
     cu->chunks_.push_back(suru::vm::Chunk {"foo", foo_begin, foo_end, 2, 2, 0});
 
-    suru::vm::Closure* entry = vm.load_closure(cu, 0, 0);
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
     ASSERT_NE(entry, nullptr);
     vm.push_value(suru::vm::Value::closure(entry));
-    EXPECT_NO_THROW(vm.exec_call());
+    EXPECT_NO_THROW(vm.call(0, 1));
 
     ASSERT_GE(vm.stack_top(), 1U);
     suru::vm::Value out = vm.pop_value();
     EXPECT_EQ(out.kind, suru::vm::ValueKind::Number);
     EXPECT_EQ(out.number_, 20.0);
 }
+

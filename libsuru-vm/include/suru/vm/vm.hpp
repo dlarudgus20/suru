@@ -22,17 +22,16 @@ public:
     VM(VM&&) = delete;
     VM& operator=(VM&&) = delete;
 
-    void exec_call();
+    void call(std::size_t arg_count, std::size_t ret_slots);
 
-    String* load_string(std::string_view text);
-    Table* load_table();
-    Closure* load_closure_c(CFunction func, size_t n);
+    String* make_string(std::string_view text);
+    Table* make_table();
+    Closure* make_closure_c(CFunction func, size_t n);
 
-    CodeUnit* load_code_unit();
-    Closure* load_closure(CodeUnit* cu, size_t chunk_index, size_t n);
+    CodeUnit* make_code_unit();
+    Closure* make_closure(CodeUnit* cu, size_t chunk_index, size_t n);
 
     Table* globals();
-    const Table* globals() const;
 
     [[nodiscard]] Value pop_value();
     void push_value(Value value);
@@ -60,6 +59,10 @@ private:
 
     std::vector<Value> v_stack_;
     std::vector<CallFrame> i_stack_;
+
+    void make_call_frame(std::size_t arg_count, std::size_t ret_slots);
+    void run_c_frame();
+    void run(std::size_t target_depth);
 };
 
 } // namespace suru::vm

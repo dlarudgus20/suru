@@ -116,12 +116,12 @@ void append_uleb(std::vector<std::uint8_t>& out, std::uint64_t value) {
 }
 
 void append_sleb32_fixed(std::vector<std::uint8_t>& out, std::int32_t value) {
-    std::uint32_t uv = static_cast<std::uint32_t>(value);
+    std::int64_t sv = static_cast<std::int64_t>(value);
     for (int i = 0; i < 4; ++i) {
-        out.push_back(static_cast<std::uint8_t>((uv & 0x7fU) | 0x80U));
-        uv >>= 7U;
+        out.push_back(static_cast<std::uint8_t>((static_cast<std::uint64_t>(sv) & 0x7fU) | 0x80U));
+        sv >>= 7;
     }
-    out.push_back(static_cast<std::uint8_t>(uv & 0x7fU));
+    out.push_back(static_cast<std::uint8_t>(static_cast<std::uint64_t>(sv) & 0x7fU));
 }
 
 std::size_t encoded_uleb_size(std::uint64_t value) {
@@ -328,7 +328,7 @@ std::string read_text_file(const std::filesystem::path& path) {
 
 void print_help(std::ostream& out) {
     out << "Usage:\n"
-        << "  suru-bc <file.sbc>\n"
+        << "  suru-bc <file.sura>\n"
         << "\n"
         << "Assembly format:\n"
         << "  .const\n"
@@ -437,7 +437,7 @@ int run_file(const std::filesystem::path& path) {
                 value = suru::vm::Value::number(number);
             } else if (parts[0] == "string") {
                 const std::string quoted = trim(rhs.substr(std::string("string").size()));
-                value = suru::vm::Value::string(vm.load_string(unquote(quoted, line_no)));
+                value = suru::vm::Value::string(vm.make_string(unquote(quoted, line_no)));
             } else if (parts[0] == "nil") {
                 value = suru::vm::Value::nil();
             } else if (parts[0] == "true") {
@@ -499,7 +499,7 @@ int run_file(const std::filesystem::path& path) {
         throw AsmError(0, "main chunk is required");
     }
 
-    suru::vm::CodeUnit* cu = vm.load_code_unit();
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
     cu->constants_.clear();
     cu->constants_.reserve(const_defs.size());
     for (const ConstDef& def : const_defs) {
@@ -544,9 +544,9 @@ int run_file(const std::filesystem::path& path) {
 
     const std::size_t main_index = chunk_index.at("main");
     const std::size_t main_upvalues = cu->chunks_[main_index].upvalues;
-    suru::vm::Closure* entry = vm.load_closure(cu, main_index, main_upvalues);
+    suru::vm::Closure* entry = vm.make_closure(cu, main_index, main_upvalues);
     vm.push_value(suru::vm::Value::closure(entry));
-    vm.exec_call();
+    vm.call(0, 0);
     return 0;
 }
 

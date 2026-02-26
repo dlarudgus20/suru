@@ -2,6 +2,7 @@
 k_print = string "print"
 k_to_number = string "to_number"
 k_type = string "type"
+k_measure = string "measure"
 k_str = string "str"
 k_table = string "table"
 k_math = string "math"
@@ -11,6 +12,7 @@ k_push = string "push"
 k_pop = string "pop"
 k_keys = string "keys"
 k_abs = string "abs"
+k_val = string "val"
 k_banner = string "== suru-bc sample =="
 k_num_text = string "123.5"
 k_spaces = string "  alpha,beta,,gamma  "
@@ -22,9 +24,15 @@ k_msg_pop = string "popped:"
 k_msg_keys = string "keys type:"
 k_msg_add = string "add2(40,2):"
 k_msg_abs = string "abs(-7):"
+k_msg_measure = string "work() elapsed(sec):"
+k_msg_pi = string "pi approximation:"
 k_n40 = number 40
 k_n2 = number 2
 k_n7n = number -7
+k_n0 = number 0
+k_n1 = number 1
+k_n4 = number 4
+k_n_loop = number 120000
 
 .chunk main 0 8 0
 ; print("== suru-bc sample ==")
@@ -129,6 +137,20 @@ CONST k_n7n
 CALL 1 1
 CALL 2 0
 
+; print("work() elapsed(sec):", measure(work))
+GET_GLOBAL k_print
+CONST k_msg_measure
+GET_GLOBAL k_measure
+CLOSURE work
+CALL 1 1
+CALL 2 0
+
+; print("pi approximation:", val)
+GET_GLOBAL k_print
+CONST k_msg_pi
+GET_GLOBAL k_val
+CALL 2 0
+
 RETURN 0
 
 .chunk add2 2 2 0
@@ -136,3 +158,61 @@ GET_LOCAL 0
 GET_LOCAL 1
 ADD
 RETURN 1
+
+.chunk work 0 6 0
+; Leibniz series: pi ~= 4 * sum((-1)^i / (2i + 1))
+; local0 = i, local1 = sum, local2 = sign, local3 = denom, local4 = term, local5 = pi
+CONST k_n0
+SET_LOCAL 0
+CONST k_n0
+SET_LOCAL 1
+CONST k_n1
+SET_LOCAL 2
+
+loop_begin:
+GET_LOCAL 0
+CONST k_n_loop
+LT
+JMP_IF_FALSE loop_end
+
+; denom = 2*i + 1
+GET_LOCAL 0
+CONST k_n2
+MUL
+CONST k_n1
+ADD
+SET_LOCAL 3
+
+; term = sign / denom
+GET_LOCAL 2
+GET_LOCAL 3
+DIV
+SET_LOCAL 4
+
+; sum = sum + term
+GET_LOCAL 1
+GET_LOCAL 4
+ADD
+SET_LOCAL 1
+
+; sign = -sign
+CONST k_n0
+GET_LOCAL 2
+SUB
+SET_LOCAL 2
+
+; i = i + 1
+GET_LOCAL 0
+CONST k_n1
+ADD
+SET_LOCAL 0
+
+JMP loop_begin
+loop_end:
+GET_LOCAL 1
+CONST k_n4
+MUL
+SET_LOCAL 5
+GET_LOCAL 5
+SET_GLOBAL k_val
+RETURN 0

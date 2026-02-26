@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cctype>
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -86,7 +87,7 @@ void std_read_line(suru::vm::VM* vm, suru::vm::Closure* self) {
         vm->push_value(std_nil());
         return;
     }
-    vm->push_value(suru::vm::Value::string(vm->load_string(line)));
+    vm->push_value(suru::vm::Value::string(vm->make_string(line)));
 }
 
 void std_to_number(suru::vm::VM* vm, suru::vm::Closure* self) {
@@ -133,7 +134,7 @@ void std_to_string(suru::vm::VM* vm, suru::vm::Closure* self) {
         return;
     }
 
-    vm->push_value(suru::vm::Value::string(vm->load_string(value_to_string(arg))));
+    vm->push_value(suru::vm::Value::string(vm->make_string(value_to_string(arg))));
 }
 
 void std_type(suru::vm::VM* vm, suru::vm::Closure* self) {
@@ -155,7 +156,29 @@ void std_type(suru::vm::VM* vm, suru::vm::Closure* self) {
         default: name = "unknown"; break;
     }
 
-    vm->push_value(suru::vm::Value::string(vm->load_string(name)));
+    vm->push_value(suru::vm::Value::string(vm->make_string(name)));
+}
+
+void std_measure(suru::vm::VM* vm, suru::vm::Closure* self) {
+    (void)self;
+    if (vm->stack_top() < 1U) {
+        vm->push_value(std_nil());
+        return;
+    }
+
+    const suru::vm::Value target = vm->getlocal(0);
+    if (target.kind != suru::vm::ValueKind::Closure || target.closure_ == nullptr) {
+        vm->push_value(std_nil());
+        return;
+    }
+
+    vm->push_value(suru::vm::Value::closure(target.closure_));
+    const auto begin = std::chrono::steady_clock::now();
+    vm->call(0, 0);
+    const auto end = std::chrono::steady_clock::now();
+
+    const std::chrono::duration<double> elapsed = end - begin;
+    vm->push_value(suru::vm::Value::number(elapsed.count()));
 }
 
 void str_trim(suru::vm::VM* vm, suru::vm::Closure* self) {
@@ -180,7 +203,7 @@ void str_trim(suru::vm::VM* vm, suru::vm::Closure* self) {
         --end;
     }
 
-    vm->push_value(suru::vm::Value::string(vm->load_string(sv.substr(begin, end - begin))));
+    vm->push_value(suru::vm::Value::string(vm->make_string(sv.substr(begin, end - begin))));
 }
 
 void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
@@ -215,7 +238,7 @@ void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
         return;
     }
 
-    suru::vm::Table* out = vm->load_table();
+    suru::vm::Table* out = vm->make_table();
     std::size_t out_index = 0;
     std::size_t pos = 0;
     while (pos <= text.size()) {
@@ -225,7 +248,7 @@ void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
         if (keep_empty || !token.empty()) {
             out->set(
                 suru::vm::Value::number(static_cast<double>(out_index++)),
-                suru::vm::Value::string(vm->load_string(token))
+                suru::vm::Value::string(vm->make_string(token))
             );
         }
 
@@ -251,7 +274,7 @@ void table_keys(suru::vm::VM* vm, suru::vm::Closure* self) {
         return;
     }
 
-    suru::vm::Table* out = vm->load_table();
+    suru::vm::Table* out = vm->make_table();
     std::size_t idx = 0;
     for (const auto& [k, v] : arg.table_->entries) {
         (void)v;
@@ -340,8 +363,8 @@ void math_ceil(suru::vm::VM* vm, suru::vm::Closure* self) {
 }
 
 void register_cfunc(suru::vm::VM& vm, std::string_view name, suru::vm::CFunction fn) {
-    suru::vm::String* key = vm.load_string(name);
-    suru::vm::Closure* func = vm.load_closure_c(fn, 0);
+    suru::vm::String* key = vm.make_string(name);
+    suru::vm::Closure* func = vm.make_closure_c(fn, 0);
     if (key == nullptr || func == nullptr) {
         throw std::runtime_error("failed to create standard function");
     }
@@ -357,10 +380,10 @@ void register_module_func(
     std::string_view function_name,
     suru::vm::CFunction fn
 ) {
-    suru::vm::String* module_key = vm.load_string(module_name);
+    suru::vm::String* module_key = vm.make_string(module_name);
     suru::vm::Value module_value = suru::vm::Value::nil();
     if (!vm.globals()->get(suru::vm::Value::string(module_key), &module_value)) {
-        suru::vm::Table* new_module = vm.load_table();
+        suru::vm::Table* new_module = vm.make_table();
         if (!vm.globals()->set(suru::vm::Value::string(module_key), suru::vm::Value::table(new_module))) {
             throw std::runtime_error("failed to create module table");
         }
@@ -371,8 +394,8 @@ void register_module_func(
         throw std::runtime_error("module value is not table");
     }
 
-    suru::vm::String* fn_key = vm.load_string(function_name);
-    suru::vm::Closure* fn_value = vm.load_closure_c(fn, 0);
+    suru::vm::String* fn_key = vm.make_string(function_name);
+    suru::vm::Closure* fn_value = vm.make_closure_c(fn, 0);
     if (!module_value.table_->set(suru::vm::Value::string(fn_key), suru::vm::Value::closure(fn_value))) {
         throw std::runtime_error("failed to register module function");
     }
@@ -386,6 +409,7 @@ void load_libs(suru::vm::VM& vm) {
     register_cfunc(vm, "to_number", &std_to_number);
     register_cfunc(vm, "to_string", &std_to_string);
     register_cfunc(vm, "type", &std_type);
+    register_cfunc(vm, "measure", &std_measure);
 
     register_module_func(vm, "str", "trim", &str_trim);
     register_module_func(vm, "str", "split", &str_split);

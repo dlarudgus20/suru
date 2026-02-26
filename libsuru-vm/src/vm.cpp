@@ -23,7 +23,7 @@ T* VM::allocate_object(size_t size, size_t align) {
 }
 
 VM::VM() {
-    global_table_ = load_table();
+    global_table_ = make_table();
     i_stack_.push_back(CallFrame {});
 }
 
@@ -42,7 +42,7 @@ VM::~VM() {
     }
 }
 
-String* VM::load_string(std::string_view text) {
+String* VM::make_string(std::string_view text) {
     auto it = interned_strings_.find(text);
     if (it != interned_strings_.end()) {
         return *it;
@@ -56,12 +56,12 @@ String* VM::load_string(std::string_view text) {
     return object;
 }
 
-Table* VM::load_table() {
+Table* VM::make_table() {
     Table* object = allocate_object<Table>(0, 1);
     return object;
 }
 
-Closure* VM::load_closure_c(CFunction func, size_t n) {
+Closure* VM::make_closure_c(CFunction func, size_t n) {
     Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
     object->code = nullptr;
     object->cfunc = func;
@@ -72,12 +72,12 @@ Closure* VM::load_closure_c(CFunction func, size_t n) {
     return object;
 }
 
-CodeUnit* VM::load_code_unit() {
+CodeUnit* VM::make_code_unit() {
     code_units_.push_back(std::make_unique<CodeUnit>());
     return code_units_.back().get();
 }
 
-Closure* VM::load_closure(CodeUnit* cu, size_t chunk_index, size_t n) {
+Closure* VM::make_closure(CodeUnit* cu, size_t chunk_index, size_t n) {
     Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
     object->code = cu;
     object->chunk_index = chunk_index;
@@ -89,10 +89,6 @@ Closure* VM::load_closure(CodeUnit* cu, size_t chunk_index, size_t n) {
 }
 
 Table* VM::globals() {
-    return global_table_;
-}
-
-const Table* VM::globals() const {
     return global_table_;
 }
 
