@@ -27,6 +27,19 @@ struct AsmError : std::runtime_error {
     AsmError(int line, std::string message) : std::runtime_error(std::move(message)), line(line) {}
 };
 
+std::string_view runtime_error_category_name(suru::vm::RuntimeErrorCategory category) {
+    switch (category) {
+        case suru::vm::RuntimeErrorCategory::Type: return "TypeError";
+        case suru::vm::RuntimeErrorCategory::Api: return "ApiError";
+        case suru::vm::RuntimeErrorCategory::Table: return "TableError";
+        case suru::vm::RuntimeErrorCategory::InvalidCode: return "InvalidCodeError";
+        case suru::vm::RuntimeErrorCategory::InvalidImage: return "InvalidImageError";
+        case suru::vm::RuntimeErrorCategory::StackOverflow: return "StackOverflowError";
+        case suru::vm::RuntimeErrorCategory::Internal: return "InternalError";
+        default: return "RuntimeError";
+    }
+}
+
 enum class Section {
     None,
     Const,
@@ -643,6 +656,9 @@ int main(int argc, char** argv) {
         } else {
             std::cerr << "error: " << e.what() << '\n';
         }
+        return 1;
+    } catch (const suru::vm::RuntimeError& e) {
+        std::cerr << "runtime error [" << runtime_error_category_name(e.category()) << "]: " << e.what() << '\n';
         return 1;
     } catch (const std::exception& e) {
         std::cerr << "runtime error: " << e.what() << '\n';

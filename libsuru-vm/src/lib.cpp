@@ -4,9 +4,10 @@
 #include <cctype>
 #include <chrono>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+
+#include "suru/vm/error.hpp"
 
 namespace suru::lib {
 namespace {
@@ -55,10 +56,7 @@ suru::vm::Value std_nil() {
     return suru::vm::Value::nil();
 }
 
-void std_print(suru::vm::VM* vm) {    if (vm == nullptr) {
-        throw std::runtime_error("print: vm is null");
-    }
-
+void std_print(suru::vm::VM* vm) {
     for (std::size_t i = 0; i < vm->stack_top(); ++i) {
         if (i != 0) {
             std::cout << '\t';
@@ -68,7 +66,8 @@ void std_print(suru::vm::VM* vm) {    if (vm == nullptr) {
     std::cout << '\n';
 }
 
-void std_read_line(suru::vm::VM* vm) {    if (vm->stack_top() >= 1U) {
+void std_read_line(suru::vm::VM* vm) {
+    if (vm->stack_top() >= 1U) {
         suru::vm::Value prompt = vm->getlocal(0);
         if (prompt.kind != suru::vm::ValueKind::String || prompt.string_ == nullptr) {
             vm->push_value(std_nil());
@@ -86,7 +85,8 @@ void std_read_line(suru::vm::VM* vm) {    if (vm->stack_top() >= 1U) {
     vm->push_value(suru::vm::Value::string(vm->make_string(line)));
 }
 
-void std_to_number(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
+void std_to_number(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -115,7 +115,8 @@ void std_to_number(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
     }
 }
 
-void std_to_string(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
+void std_to_string(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -129,7 +130,8 @@ void std_to_string(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
     vm->push_value(suru::vm::Value::string(vm->make_string(value_to_string(arg))));
 }
 
-void std_type(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
+void std_type(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -170,7 +172,8 @@ void std_div(suru::vm::VM* vm) {
     vm->push_value(suru::vm::Value::number(remainder));
 }
 
-void std_measure(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
+void std_measure(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -190,7 +193,8 @@ void std_measure(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
     vm->push_value(suru::vm::Value::number(elapsed.count()));
 }
 
-void str_trim(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
+void str_trim(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -213,7 +217,8 @@ void str_trim(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
     vm->push_value(suru::vm::Value::string(vm->make_string(sv.substr(begin, end - begin))));
 }
 
-void str_split(suru::vm::VM* vm) {    if (vm->stack_top() < 2U) {
+void str_split(suru::vm::VM* vm) {
+    if (vm->stack_top() < 2U) {
         vm->push_value(std_nil());
         return;
     }
@@ -266,7 +271,8 @@ void str_split(suru::vm::VM* vm) {    if (vm->stack_top() < 2U) {
     vm->push_value(suru::vm::Value::table(out));
 }
 
-void table_keys(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
+void table_keys(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -286,7 +292,8 @@ void table_keys(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
     vm->push_value(suru::vm::Value::table(out));
 }
 
-void table_push(suru::vm::VM* vm) {    if (vm->stack_top() < 2U) {
+void table_push(suru::vm::VM* vm) {
+    if (vm->stack_top() < 2U) {
         vm->push_value(std_nil());
         return;
     }
@@ -307,7 +314,8 @@ void table_push(suru::vm::VM* vm) {    if (vm->stack_top() < 2U) {
     vm->push_value(suru::vm::Value::number(next_index + 1.0));
 }
 
-void table_pop(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
+void table_pop(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -334,21 +342,24 @@ void table_pop(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
     vm->push_value(out);
 }
 
-void math_abs(suru::vm::VM* vm) {    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
+void math_abs(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
     vm->push_value(suru::vm::Value::number(std::abs(vm->getlocal(0).number_)));
 }
 
-void math_floor(suru::vm::VM* vm) {    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
+void math_floor(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
     vm->push_value(suru::vm::Value::number(std::floor(vm->getlocal(0).number_)));
 }
 
-void math_ceil(suru::vm::VM* vm) {    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
+void math_ceil(suru::vm::VM* vm) {
+    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
@@ -359,11 +370,11 @@ void register_cfunc(suru::vm::VM& vm, std::string_view name, suru::vm::CFunction
     suru::vm::String* key = vm.make_string(name);
     suru::vm::Closure* func = vm.make_closure_c(fn, 0);
     if (key == nullptr || func == nullptr) {
-        throw std::runtime_error("failed to create standard function");
+        throw suru::vm::InternalError("failed to create standard function");
     }
 
     if (!vm.globals()->set(suru::vm::Value::string(key), suru::vm::Value::closure(func))) {
-        throw std::runtime_error("failed to register standard function");
+        throw suru::vm::InternalError("failed to register standard function");
     }
 }
 
@@ -378,19 +389,19 @@ void register_module_func(
     if (!vm.globals()->get(suru::vm::Value::string(module_key), &module_value)) {
         suru::vm::Table* new_module = vm.make_table();
         if (!vm.globals()->set(suru::vm::Value::string(module_key), suru::vm::Value::table(new_module))) {
-            throw std::runtime_error("failed to create module table");
+            throw suru::vm::InternalError("failed to create module table");
         }
         module_value = suru::vm::Value::table(new_module);
     }
 
     if (module_value.kind != suru::vm::ValueKind::Table || module_value.table_ == nullptr) {
-        throw std::runtime_error("module value is not table");
+        throw suru::vm::TypeError("module value is not table");
     }
 
     suru::vm::String* fn_key = vm.make_string(function_name);
     suru::vm::Closure* fn_value = vm.make_closure_c(fn, 0);
     if (!module_value.table_->set(suru::vm::Value::string(fn_key), suru::vm::Value::closure(fn_value))) {
-        throw std::runtime_error("failed to register module function");
+        throw suru::vm::InternalError("failed to register module function");
     }
 }
 

@@ -4,10 +4,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+
+#include "suru/vm/error.hpp"
 
 namespace suru::vm {
 
@@ -148,7 +149,7 @@ struct Value {
 
 private:
     [[noreturn]] static void type_error(std::string_view where, std::string_view expected) {
-        throw std::runtime_error(std::string(where) + ": expected " + std::string(expected));
+        throw TypeError(std::string(where) + ": expected " + std::string(expected));
     }
 };
 

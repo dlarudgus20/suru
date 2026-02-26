@@ -3,10 +3,12 @@
 #include <functional>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <utility>
-#include <stdexcept>
+
+#include "suru/vm/error.hpp"
 
 namespace suru::vm {
 
@@ -93,11 +95,14 @@ Table* VM::globals() {
 }
 
 Value VM::pop_value() {
-    if (v_stack_.empty()) {
-        throw std::runtime_error("stack underflow");
+    if (i_stack_.empty()) {
+        throw InternalError("call frame is not available");
     }
-    if (!i_stack_.empty() && v_stack_.size() <= i_stack_.back().base) {
-        throw std::runtime_error("frame stack underflow");
+    if (v_stack_.size() <= i_stack_.back().base) {
+        throw InternalError("frame stack underflow");
+    }
+    if (v_stack_.empty()) {
+        throw ApiError("stack underflow");
     }
     Value out = v_stack_.back();
     v_stack_.pop_back();
@@ -105,41 +110,45 @@ Value VM::pop_value() {
 }
 
 void VM::push_value(Value value) {
+    if (v_stack_.size() >= std::numeric_limits<std::uint32_t>::max()) {
+        throw InternalError("stack exceeds uint32 range");
+    }
     v_stack_.push_back(value);
 }
 
 std::size_t VM::stack_top() const {
     if (i_stack_.empty()) {
-        return v_stack_.size();
+        throw InternalError("call frame is not available");
     }
     const std::size_t base = i_stack_.back().base;
     if (v_stack_.size() < base) {
-        throw std::runtime_error("frame base is out of stack bounds");
+        throw InternalError("frame base is out of stack bounds");
     }
     return v_stack_.size() - base;
 }
 
 Value VM::getlocal(std::uint8_t index) const {
     if (i_stack_.empty()) {
-        throw std::runtime_error("call frame is not available");
+        throw InternalError("call frame is not available");
     }
     const std::size_t at = i_stack_.back().base + index;
     if (at >= v_stack_.size()) {
-        throw std::runtime_error("local index out of bounds");
+        throw ApiError("local index out of bounds");
     }
     return v_stack_[at];
 }
 
 Value VM::getupvalue(std::uint8_t index) const {
     if (i_stack_.empty()) {
-        throw std::runtime_error("call frame is not available");
+        throw InternalError("call frame is not available");
     }
     Closure* closure = i_stack_.back().closure;
     if (closure == nullptr) {
-        throw std::runtime_error("call frame closure is not available");
+        // the number of upvalues of sentinel callframe is treated as 0
+        throw ApiError("upvalue index out of bounds");
     }
     if (index >= closure->len) {
-        throw std::runtime_error("upvalue index out of bounds");
+        throw ApiError("upvalue index out of bounds");
     }
     return closure->at(index);
 }

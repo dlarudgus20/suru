@@ -1,18 +1,20 @@
-# Suru Runtime Errors and REPL
+# Suru Runtime Errors
 
 ## 오류 분류
-- `TypeError`: 연산 피연산자 타입 불일치
-- `NameError`: 식별자 해석 실패
-- `CallError`: 호출 불가능 값 호출
-- `TableError`: 잘못된 키 접근/갱신
-- `RuntimeLimitError`: 스택/리소스 제한 초과
+- `TypeError`: 타입이 맞지 않는 연산/변환
+- `ApiError`: VM C++ API 사용 오류
+- `TableError`: 테이블 키/값 접근 또는 갱신 실패
+- `InvalidCodeError`: 바이트코드 자체가 유효하지 않음(레지스터/점프/상수 인덱스 등)
+- `InvalidImageError`: CodeUnit/Chunk 메타데이터가 유효하지 않음
+- `StackOverflowError`: VM 내부 인덱스(`uint32_t`) 범위를 넘는 스택/프레임 크기
+- `InternalError`: VM 내부 불변식 위반 또는 비정상 상태
 
 ## 진단 구조
-런타임 진단은 다음 필드를 가진다.
-- `category`: 오류 분류
-- `message`: 사용자 메시지
-- `location`(optional): 소스 위치
+모든 런타임 오류는 다음 정보를 가진다.
+- `category`: 오류 카테고리
+- `message`: 사람이 읽는 설명 메시지
+- `location`: 현재 미지원(소스/바이트코드 매핑 추가 시 도입 예정)
 
-## 실패 정책
-- 치명 오류 발생 시 현재 평가를 중단하고 `error` 상태 반환
-- 복수 진단 수집은 선택 정책으로 두되, 기본은 첫 오류 우선
+## 처리 원칙
+- 치명적 런타임 오류 발생 시 현재 실행을 중단하고 즉시 실패 처리한다.
+- `suru-bc`는 `runtime error [Category]: message` 형식으로 출력한다.
