@@ -16,13 +16,15 @@ namespace {
 
 constexpr std::uint32_t kOpShift = 26U;
 constexpr std::uint32_t kOpMask = 0x3FU;
-constexpr std::uint32_t kAShift = 18U;
+constexpr std::uint32_t kIShift = 25U;
+constexpr std::uint32_t kIMask = 0x1U;
+constexpr std::uint32_t kAShift = 17U;
 constexpr std::uint32_t kAMask = 0xFFU;
 constexpr std::uint32_t kBShift = 9U;
-constexpr std::uint32_t kBMask = 0x1FFU;
+constexpr std::uint32_t kBMask = 0xFFU;
 constexpr std::uint32_t kCMask = 0x1FFU;
-constexpr std::uint32_t kBxMask = 0x3FFFFU;
-constexpr std::uint32_t kAxMask = 0x3FFFFFFU;
+constexpr std::uint32_t kBxMask = 0x1FFFFU;
+constexpr std::uint32_t kAxMask = 0x1FFFFFFU;
 
 std::uint32_t checked_u32_stack_index(std::size_t value, std::string_view where) {
     if (value > std::numeric_limits<std::uint32_t>::max()) {
@@ -36,14 +38,40 @@ Op decode_op(std::uint32_t word) {
 }
 
 struct WordABC {
+    bool i;
     std::uint32_t a;
     std::uint32_t b;
     std::uint32_t c;
+
+    std::int32_t imm_c() const {
+        const std::uint32_t raw = c & kCMask;
+        if ((raw & (1U << 8U)) == 0U) {
+            return static_cast<std::int32_t>(raw);
+        }
+        return static_cast<std::int32_t>(raw | (~kCMask));
+    }
+
+    std::int32_t imm_b() const {
+        const std::uint32_t raw = b & kBMask;
+        if ((raw & (1U << 7U)) == 0U) {
+            return static_cast<std::int32_t>(raw);
+        }
+        return static_cast<std::int32_t>(raw | (~kBMask));
+    }
 };
 
 struct WordABx {
+    bool i;
     std::uint32_t a;
     std::uint32_t bx;
+
+    std::int32_t imm_bx() const {
+        const std::uint32_t raw = bx & kBxMask;
+        if ((raw & (1U << 16U)) == 0U) {
+            return static_cast<std::int32_t>(raw);
+        }
+        return static_cast<std::int32_t>(raw | (~kBxMask));
+    }
 };
 
 struct WordSAx {
@@ -52,6 +80,7 @@ struct WordSAx {
 
 WordABC decode_abc(std::uint32_t word) {
     return WordABC {
+        ((word >> kIShift) & kIMask) != 0U,
         (word >> kAShift) & kAMask,
         (word >> kBShift) & kBMask,
         word & kCMask,
@@ -60,6 +89,7 @@ WordABC decode_abc(std::uint32_t word) {
 
 WordABx decode_abx(std::uint32_t word) {
     return WordABx {
+        ((word >> kIShift) & kIMask) != 0U,
         (word >> kAShift) & kAMask,
         word & kBxMask,
     };
@@ -67,7 +97,7 @@ WordABx decode_abx(std::uint32_t word) {
 
 WordSAx decode_sax(std::uint32_t word) {
     const std::uint32_t raw = word & kAxMask;
-    if ((raw & (1U << 25U)) == 0U) {
+    if ((raw & (1U << 24U)) == 0U) {
         return WordSAx {static_cast<std::int32_t>(raw)};
     }
     return WordSAx {static_cast<std::int32_t>(raw | (~kAxMask))};
@@ -312,9 +342,13 @@ void VM::run(std::size_t target_depth) {
         const Op op = decode_op(word);
 
         switch (op) {
-            case Op::Move: {
-                const auto [a, b] = decode_abx(word);
-                reg_write(a, reg_read(b));
+            case Op::Load: {
+                const auto w = decode_abx(word);
+                if (w.i) {
+                    reg_write(w.a, Value::number(static_cast<double>(w.imm_bx())));
+                    break;
+                }
+                reg_write(w.a, reg_read(w.bx));
                 break;
             }
             case Op::LoadNil: {
@@ -333,19 +367,19 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::LoadK: {
-                const auto [a, k] = decode_abx(word);
-                if (k >= cu->constants_.size()) {
+                const auto w = decode_abx(word);
+                if (w.bx >= cu->constants_.size()) {
                     throw InvalidCodeError("constant index out of bounds");
                 }
-                reg_write(a, cu->constants_[k]);
+                reg_write(w.a, cu->constants_[w.bx]);
                 break;
             }
-            case Op::GetGlobal: {
-                const auto [a, k] = decode_abx(word);
-                if (k >= cu->constants_.size()) {
+            case Op::GetGlobalK: {
+                const auto w = decode_abx(word);
+                if (w.a >= cu->constants_.size()) {
                     throw InvalidCodeError("global key constant index out of bounds");
                 }
-                const Value key = cu->constants_[k];
+                const Value key = cu->constants_[w.a];
                 if (key.kind != ValueKind::String) {
                     throw TableError("global key must be string");
                 }
@@ -353,201 +387,249 @@ void VM::run(std::size_t target_depth) {
                 if (!globals()->get(key, &out)) {
                     out = Value::nil();
                 }
-                reg_write(a, out);
+                reg_write(w.bx, out);
                 break;
             }
-            case Op::SetGlobal: {
-                const auto [a, k] = decode_abx(word);
-                if (k >= cu->constants_.size()) {
+            case Op::SetGlobalK: {
+                const auto w = decode_abx(word);
+                if (w.a >= cu->constants_.size()) {
                     throw InvalidCodeError("global key constant index out of bounds");
                 }
-                const Value key = cu->constants_[k];
+                const Value key = cu->constants_[w.a];
                 if (key.kind != ValueKind::String) {
                     throw TableError("global key must be string");
                 }
-                if (!globals()->set(key, reg_read(a))) {
+                const Value value = w.i ? Value::number(static_cast<double>(w.imm_bx())) : reg_read(w.bx);
+                if (!globals()->set(key, value)) {
+                    throw TableError("failed to set global value");
+                }
+                break;
+            }
+            case Op::GetGlobal: {
+                const auto w = decode_abx(word);
+                Value out = Value::nil();
+                if (!globals()->get(reg_read(w.a), &out)) {
+                    out = Value::nil();
+                }
+                reg_write(w.bx, out);
+                break;
+            }
+            case Op::SetGlobal: {
+                const auto w = decode_abx(word);
+                const Value value = w.i ? Value::number(static_cast<double>(w.imm_bx())) : reg_read(w.bx);
+                if (!globals()->set(reg_read(w.a), value)) {
                     throw TableError("failed to set global value");
                 }
                 break;
             }
             case Op::Add: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
-                    reg_read(b).as_number("binary op") + reg_read(c).as_number("binary op")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
+                    reg_read(w.b).as_number("binary op")
+                    + (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("binary op"))
                 ));
                 break;
             }
             case Op::Sub: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
-                    reg_read(b).as_number("binary op") - reg_read(c).as_number("binary op")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
+                    reg_read(w.b).as_number("binary op")
+                    - (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("binary op"))
                 ));
                 break;
             }
             case Op::Mul: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
-                    reg_read(b).as_number("binary op") * reg_read(c).as_number("binary op")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
+                    reg_read(w.b).as_number("binary op")
+                    * (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("binary op"))
                 ));
                 break;
             }
             case Op::Div: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
-                    reg_read(b).as_number("binary op") / reg_read(c).as_number("binary op")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
+                    reg_read(w.b).as_number("binary op")
+                    / (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("binary op"))
                 ));
                 break;
             }
             case Op::Idiv: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
-                    std::floor(reg_read(b).as_number("binary op") / reg_read(c).as_number("binary op"))
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
+                    std::floor(
+                        reg_read(w.b).as_number("binary op")
+                        / (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("binary op"))
+                    )
                 ));
                 break;
             }
             case Op::Mod: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
-                    std::fmod(reg_read(b).as_number("binary op"), reg_read(c).as_number("binary op"))
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
+                    std::fmod(
+                        reg_read(w.b).as_number("binary op"),
+                        (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("binary op"))
+                    )
                 ));
                 break;
             }
             case Op::Pow: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
-                    std::pow(reg_read(b).as_number("binary op"), reg_read(c).as_number("binary op"))
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
+                    std::pow(
+                        reg_read(w.b).as_number("binary op"),
+                        (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("binary op"))
+                    )
                 ));
                 break;
             }
             case Op::Concat: {
-                const auto [a, b, c] = decode_abc(word);
-                const std::string lhs = concat_operand_to_string(reg_read(b));
-                const std::string rhs = concat_operand_to_string(reg_read(c));
-                reg_write(a, Value::string(make_string(lhs + rhs)));
+                const auto w = decode_abc(word);
+                const std::string lhs = concat_operand_to_string(reg_read(w.b));
+                const std::string rhs = w.i
+                    ? concat_operand_to_string(Value::number(static_cast<double>(w.imm_c())))
+                    : concat_operand_to_string(reg_read(w.c));
+                reg_write(w.a, Value::string(make_string(lhs + rhs)));
                 break;
             }
             case Op::Eq: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    value_equals(reg_read(b), reg_read(c))
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    value_equals(
+                        reg_read(w.b),
+                        w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c)
+                    )
                 ));
                 break;
             }
             case Op::Ne: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    !value_equals(reg_read(b), reg_read(c))
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    !value_equals(
+                        reg_read(w.b),
+                        w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c)
+                    )
                 ));
                 break;
             }
             case Op::Lt: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    reg_read(b).as_number("compare") < reg_read(c).as_number("compare")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    reg_read(w.b).as_number("compare")
+                    < (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("compare"))
                 ));
                 break;
             }
             case Op::Le: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    reg_read(b).as_number("compare") <= reg_read(c).as_number("compare")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    reg_read(w.b).as_number("compare")
+                    <= (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("compare"))
                 ));
                 break;
             }
             case Op::Gt: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    reg_read(b).as_number("compare") > reg_read(c).as_number("compare")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    reg_read(w.b).as_number("compare")
+                    > (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("compare"))
                 ));
                 break;
             }
             case Op::Ge: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    reg_read(b).as_number("compare") >= reg_read(c).as_number("compare")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    reg_read(w.b).as_number("compare")
+                    >= (w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("compare"))
                 ));
                 break;
             }
             case Op::And: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    reg_read(b).as_boolean("logical op") && reg_read(c).as_boolean("logical op")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    reg_read(w.b).as_boolean("logical op") && reg_read(w.c).as_boolean("logical op")
                 ));
                 break;
             }
             case Op::Or: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::boolean(
-                    reg_read(b).as_boolean("logical op") || reg_read(c).as_boolean("logical op")
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::boolean(
+                    reg_read(w.b).as_boolean("logical op") || reg_read(w.c).as_boolean("logical op")
                 ));
                 break;
             }
             case Op::Band: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
                     static_cast<double>(
-                        reg_read(b).as_integer("bit op") & reg_read(c).as_integer("bit op")
+                        reg_read(w.b).as_integer("bit op")
+                        & (w.i ? static_cast<std::int64_t>(w.imm_c()) : reg_read(w.c).as_integer("bit op"))
                     )
                 ));
                 break;
             }
             case Op::Bor: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
                     static_cast<double>(
-                        reg_read(b).as_integer("bit op") | reg_read(c).as_integer("bit op")
+                        reg_read(w.b).as_integer("bit op")
+                        | (w.i ? static_cast<std::int64_t>(w.imm_c()) : reg_read(w.c).as_integer("bit op"))
                     )
                 ));
                 break;
             }
             case Op::Bxor: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
                     static_cast<double>(
-                        reg_read(b).as_integer("bit op") ^ reg_read(c).as_integer("bit op")
+                        reg_read(w.b).as_integer("bit op")
+                        ^ (w.i ? static_cast<std::int64_t>(w.imm_c()) : reg_read(w.c).as_integer("bit op"))
                     )
                 ));
                 break;
             }
             case Op::Shl: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
                     static_cast<double>(
-                        reg_read(b).as_integer("bit op") << reg_read(c).as_integer("bit op")
+                        reg_read(w.b).as_integer("bit op")
+                        << (w.i ? static_cast<std::int64_t>(w.imm_c()) : reg_read(w.c).as_integer("bit op"))
                     )
                 ));
                 break;
             }
             case Op::Shr: {
-                const auto [a, b, c] = decode_abc(word);
-                reg_write(a, Value::number(
+                const auto w = decode_abc(word);
+                reg_write(w.a, Value::number(
                     static_cast<double>(
-                        reg_read(b).as_integer("bit op") >> reg_read(c).as_integer("bit op")
+                        reg_read(w.b).as_integer("bit op")
+                        >> (w.i ? static_cast<std::int64_t>(w.imm_c()) : reg_read(w.c).as_integer("bit op"))
                     )
                 ));
                 break;
             }
             case Op::Neg: {
-                const auto [a, b] = decode_abx(word);
-                reg_write(a, Value::number(-reg_read(b).as_number("neg")));
+                const auto w = decode_abx(word);
+                reg_write(w.a, Value::number(-reg_read(w.bx).as_number("neg")));
                 break;
             }
             case Op::Not: {
-                const auto [a, b] = decode_abx(word);
-                reg_write(a, Value::boolean(reg_read(b).is_falsy()));
+                const auto w = decode_abx(word);
+                reg_write(w.a, Value::boolean(reg_read(w.bx).is_falsy()));
                 break;
             }
             case Op::Len: {
-                const auto [a, b] = decode_abx(word);
-                const Value v = reg_read(b);
+                const auto w = decode_abx(word);
+                const Value v = reg_read(w.bx);
                 if (v.kind == ValueKind::String) {
                     const String* str = v.as_string("len");
-                    reg_write(a, Value::number(static_cast<double>(str->len)));
+                    reg_write(w.a, Value::number(static_cast<double>(str->len)));
                     break;
                 }
                 if (v.kind == ValueKind::Array) {
                     const Array* arr = v.as_array("len");
-                    reg_write(a, Value::number(static_cast<double>(arr->elements.size())));
+                    reg_write(w.a, Value::number(static_cast<double>(arr->elements.size())));
                     break;
                 }
                 throw TypeError("len: expected string/array");
@@ -559,40 +641,62 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::NewArray: {
-                const auto [a, b] = decode_abx(word);
-                reg_write(a, Value::array(make_array(to_array_length(reg_read(b)))));
+                const auto w = decode_abx(word);
+                if (w.i) {
+                    reg_write(w.a, Value::array(make_array(to_array_length(Value::number(static_cast<double>(w.imm_bx()))))));
+                    break;
+                }
+                reg_write(w.a, Value::array(make_array(to_array_length(reg_read(w.bx)))));
                 break;
             }
             case Op::GetTable: {
-                const auto [a, b, c] = decode_abc(word);
-                Table* table = reg_read(b).as_table("gettable");
+                const auto w = decode_abc(word);
+                Table* table = reg_read(w.b).as_table("gettable");
                 Value out = Value::nil();
-                if (!table->get(reg_read(c), &out)) {
+                if (!table->get(reg_read(w.c), &out)) {
                     out = Value::nil();
                 }
-                reg_write(a, out);
+                reg_write(w.a, out);
                 break;
             }
             case Op::GetArray: {
-                const auto [a, b, c] = decode_abc(word);
-                Array* array = reg_read(b).as_array("getarray");
-                const std::size_t idx = resolve_array_index(array->elements.size(), reg_read(c));
-                reg_write(a, array->elements[idx]);
+                const auto w = decode_abc(word);
+                Array* array = reg_read(w.b).as_array("getarray");
+                const Value idx_v = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
+                const std::size_t idx = resolve_array_index(array->elements.size(), idx_v);
+                reg_write(w.a, array->elements[idx]);
                 break;
             }
             case Op::SetTable: {
-                const auto [a, b, c] = decode_abc(word);
-                Table* table = reg_read(a).as_table("settable");
-                if (!table->set(reg_read(b), reg_read(c))) {
+                const auto w = decode_abc(word);
+                Table* table = reg_read(w.a).as_table("settable");
+                const Value value = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
+                if (!table->set(reg_read(w.b), value)) {
                     throw TableError("failed to set table key");
                 }
                 break;
             }
             case Op::SetArray: {
-                const auto [a, b, c] = decode_abc(word);
-                Array* array = reg_read(a).as_array("setarray");
-                const std::size_t idx = resolve_array_index(array->elements.size(), reg_read(b));
-                array->elements[idx] = reg_read(c);
+                const auto w = decode_abc(word);
+                Array* array = reg_read(w.a).as_array("setarray");
+                const std::size_t idx = resolve_array_index(array->elements.size(), reg_read(w.b));
+                array->elements[idx] = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
+                break;
+            }
+            case Op::GetArrayI: {
+                const auto w = decode_abc(word);
+                Array* array = reg_read(w.c).as_array("getarrayi");
+                const Value idx_v = Value::number(static_cast<double>(w.imm_b()));
+                const std::size_t idx = resolve_array_index(array->elements.size(), idx_v);
+                reg_write(w.a, array->elements[idx]);
+                break;
+            }
+            case Op::SetArrayI: {
+                const auto w = decode_abc(word);
+                Array* array = reg_read(w.a).as_array("setarrayi");
+                const Value idx_v = Value::number(static_cast<double>(w.imm_b()));
+                const std::size_t idx = resolve_array_index(array->elements.size(), idx_v);
+                array->elements[idx] = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
                 break;
             }
             case Op::Jmp: {
@@ -619,53 +723,62 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::IfEq: {
-                const auto [_, b, c] = decode_abc(word);
-                if (!value_equals(reg_read(b), reg_read(c))) {
+                const auto w = decode_abc(word);
+                const Value rhs = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
+                if (!value_equals(reg_read(w.b), rhs)) {
                     ++frame.pc;
                 }
                 break;
             }
             case Op::IfNe: {
-                const auto [_, b, c] = decode_abc(word);
-                if (value_equals(reg_read(b), reg_read(c))) {
+                const auto w = decode_abc(word);
+                const Value rhs = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
+                if (value_equals(reg_read(w.b), rhs)) {
                     ++frame.pc;
                 }
                 break;
             }
             case Op::IfLt: {
-                const auto [_, b, c] = decode_abc(word);
-                if (!(reg_read(b).as_number("if compare")
-                    < reg_read(c).as_number("if compare"))) {
+                const auto w = decode_abc(word);
+                const double rhs = w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("if compare");
+                if (!(reg_read(w.b).as_number("if compare")
+                    < rhs)) {
                     ++frame.pc;
                 }
                 break;
             }
             case Op::IfLe: {
-                const auto [_, b, c] = decode_abc(word);
-                if (!(reg_read(b).as_number("if compare")
-                    <= reg_read(c).as_number("if compare"))) {
+                const auto w = decode_abc(word);
+                const double rhs = w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("if compare");
+                if (!(reg_read(w.b).as_number("if compare")
+                    <= rhs)) {
                     ++frame.pc;
                 }
                 break;
             }
             case Op::IfGt: {
-                const auto [_, b, c] = decode_abc(word);
-                if (!(reg_read(b).as_number("if compare")
-                    > reg_read(c).as_number("if compare"))) {
+                const auto w = decode_abc(word);
+                const double rhs = w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("if compare");
+                if (!(reg_read(w.b).as_number("if compare")
+                    > rhs)) {
                     ++frame.pc;
                 }
                 break;
             }
             case Op::IfGe: {
-                const auto [_, b, c] = decode_abc(word);
-                if (!(reg_read(b).as_number("if compare")
-                    >= reg_read(c).as_number("if compare"))) {
+                const auto w = decode_abc(word);
+                const double rhs = w.i ? static_cast<double>(w.imm_c()) : reg_read(w.c).as_number("if compare");
+                if (!(reg_read(w.b).as_number("if compare")
+                    >= rhs)) {
                     ++frame.pc;
                 }
                 break;
             }
             case Op::Call: {
-                const auto [f, arg_count, ret_count] = decode_abc(word);
+                const auto w = decode_abc(word);
+                const std::uint32_t f = w.a;
+                const std::uint32_t arg_count = w.b;
+                const std::uint32_t ret_count = w.c;
                 const std::uint32_t avail = frame_limit - frame.base;
                 if (f >= avail) {
                     throw InvalidCodeError("call register index out of bounds");
@@ -675,6 +788,9 @@ void VM::run(std::size_t target_depth) {
                 }
                 if (f + ret_count > avail) {
                     throw InvalidCodeError("call return range out of bounds");
+                }
+                if (ret_count > std::numeric_limits<std::uint8_t>::max()) {
+                    throw InvalidCodeError("call return count out of bounds");
                 }
 
                 frame.call_dst = static_cast<std::uint8_t>(f);
@@ -687,12 +803,12 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::Closure: {
-                const auto [a, chunk_index] = decode_abx(word);
-                if (chunk_index >= cu->chunks_.size()) {
+                const auto w = decode_abx(word);
+                if (w.bx >= cu->chunks_.size()) {
                     throw InvalidImageError("closure chunk index out of bounds");
                 }
-                const Chunk& chunk = cu->chunks_[chunk_index];
-                Closure* closure = make_closure(cu, chunk_index);
+                const Chunk& chunk = cu->chunks_[w.bx];
+                Closure* closure = make_closure(cu, w.bx);
                 for (std::uint8_t i = 0; i < closure->len; ++i) {
                     const UpvalueInfo info = chunk.upvalue_infos[i];
                     if (info.source == UpvalueSource::Local) {
@@ -716,57 +832,58 @@ void VM::run(std::size_t target_depth) {
                     }
                     throw InvalidImageError("unknown upvalue source");
                 }
-                reg_write(a, Value::closure(closure));
+                reg_write(w.a, Value::closure(closure));
                 break;
             }
             case Op::GetUpvalue: {
-                const auto [a, idx] = decode_abx(word);
-                if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
+                const auto w = decode_abx(word);
+                if (w.a > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(w.a) >= current->len) {
                     throw InvalidCodeError("upvalue index out of bounds");
                 }
-                Upvalue* upvalue = current->at(static_cast<std::uint8_t>(idx));
+                Upvalue* upvalue = current->at(static_cast<std::uint8_t>(w.a));
                 if (upvalue == nullptr) {
                     throw InternalError("upvalue is not initialized");
                 }
                 if (!upvalue->is_open) {
-                    reg_write(a, upvalue->closed);
+                    reg_write(w.bx, upvalue->closed);
                     break;
                 }
                 if (upvalue->slot >= v_stack_.size()) {
                     throw InternalError("open upvalue slot out of bounds");
                 }
-                reg_write(a, v_stack_[upvalue->slot]);
+                reg_write(w.bx, v_stack_[upvalue->slot]);
                 break;
             }
             case Op::SetUpvalue: {
-                const auto [a, idx] = decode_abx(word);
-                if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
+                const auto w = decode_abx(word);
+                if (w.a > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(w.a) >= current->len) {
                     throw InvalidCodeError("upvalue index out of bounds");
                 }
-                Upvalue* upvalue = current->at(static_cast<std::uint8_t>(idx));
+                Upvalue* upvalue = current->at(static_cast<std::uint8_t>(w.a));
                 if (upvalue == nullptr) {
                     throw InternalError("upvalue is not initialized");
                 }
+                const Value value = w.i ? Value::number(static_cast<double>(w.imm_bx())) : reg_read(w.bx);
                 if (!upvalue->is_open) {
-                    upvalue->closed = reg_read(a);
+                    upvalue->closed = value;
                     break;
                 }
                 if (upvalue->slot >= v_stack_.size()) {
                     throw InternalError("open upvalue slot out of bounds");
                 }
-                v_stack_[upvalue->slot] = reg_read(a);
+                v_stack_[upvalue->slot] = value;
                 break;
             }
             case Op::Return: {
-                const auto [a, ret_count] = decode_abx(word);
-                if (frame.base + a + ret_count > frame_limit) {
+                const auto w = decode_abx(word);
+                if (frame.base + w.a + w.bx > frame_limit) {
                     throw InvalidCodeError("return register range out of bounds");
                 }
 
                 const std::uint32_t frame_base = frame.base;
                 const std::uint8_t expected = frame.ret_slots;
-                const std::uint32_t result_begin = frame_base + a;
-                const std::uint32_t result_end = result_begin + ret_count;
+                const std::uint32_t result_begin = frame_base + w.a;
+                const std::uint32_t result_end = result_begin + w.bx;
                 i_stack_.pop_back();
                 close_upvalues(frame_base);
                 finish_frame_return(frame_base, expected, result_begin, result_end);

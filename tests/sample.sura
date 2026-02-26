@@ -12,23 +12,20 @@ k_4 = number 4
 k_loop = number 120000
 
 .chunk main 0 8
-GETGLOBAL 0 k_print
+GETGLOBALK k_print 0
 LOADK 1 k_msg
 CALL 0 1 0
-
-GETGLOBAL 0 k_measure
+GETGLOBALK k_measure 0
 CLOSURE 1 work
 CALL 0 1 1
-MOVE 2 0
-
-GETGLOBAL 0 k_print
+LOAD 2 0
+GETGLOBALK k_print 0
 LOADK 1 k_elapsed
-MOVE 2 2
+LOAD 2 2
 CALL 0 2 0
-
-GETGLOBAL 0 k_print
+GETGLOBALK k_print 0
 LOADK 1 k_pi
-GETGLOBAL 2 k_val
+GETGLOBALK k_val 2
 CALL 0 2 0
 
 RETURN 0 0
@@ -56,5 +53,5 @@ JMP loop_begin
 
 loop_end:
 MUL 7 1 6
-SETGLOBAL k_val 7
+SETGLOBALK k_val 7
 RETURN 0 0

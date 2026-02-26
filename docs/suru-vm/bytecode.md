@@ -14,9 +14,13 @@
 
 ## 비트 포맷
 - 공통: `op`는 상위 6비트 (`bits 31..26`)
-- `ABC`: `op(6) | A(8) | B(9) | C(9)`
-- `ABx`: `op(6) | A(8) | Bx(18)`
-- `sAx`: `op(6) | sAx(26)` (2의 보수 signed)
+- `ABC`: `op(6) | i(1) | A(8) | B(8) | C(9)`
+- `ABx`: `op(6) | i(1) | A(8) | Bx(17)` (`Bx = (B<<9)|C`)
+- `sAx`: `op(6) | sAx(25)` (2의 보수 signed)
+
+`i=1`일 때 일부 opcode는 `C` 또는 `Bx`를 immediate integer로 해석한다.
+- `C` immediate: signed 9-bit (`-256..255`)
+- `Bx` immediate: signed 17-bit (`-65536..65535`)
 
 ## 레지스터와 호출 규약
 - 레지스터는 현재 프레임의 `R[0..slots-1]` 범위를 사용한다.
@@ -47,6 +51,14 @@
 - `SETARRAY A B C`
   - `R[A]`는 array, `R[B]`는 인덱스, `R[C]`는 저장 값이다.
   - 인덱스 규칙/오류는 `GETARRAY`와 동일하다.
+
+## Immediate 규약
+- 어셈블리에서 immediate는 `#` 접두사로 표기한다.
+  - 예: `ADD 0 1 #2`, `NEWARRAY 3 #8`, `GETARRAY 4 3 #-1`
+- `i=1` immediate 활성 opcode
+  - ABC: `ADD SUB MUL DIV IDIV MOD POW CONCAT EQ NE LT LE GT GE BAND BOR BXOR SHL SHR GETARRAY SETARRAY SETTABLE IFEQ IFNE IFLT IFLE IFGT IFGE SETARRAYI`
+  - ABx: `LOAD NEWARRAY SETGLOBALK SETUPVAL SETGLOBAL`
+- 그 외 opcode에서 `i`는 무시된다.
 
 ## 업밸류 캡처 규약
 `Chunk`는 `upvalue_infos`를 가진다. 각 항목은 `{ source, index }`다.
@@ -86,32 +98,45 @@ RETURN 0 1
 ```
 
 ## Opcode 동작 요약
+표기 규약:
+- `R[x]`: 현재 프레임 레지스터 `x`
+- `RI[C]`: `i=1`이면 immediate `C`(signed 9-bit), 아니면 `R[C]`
+- `RI[Bx]`: `i=1`이면 immediate `Bx`(signed 17-bit), 아니면 `R[Bx]`
+- `I[B]`: `B` 필드를 immediate로 해석한다 (signed 8-bit)
+- `K[k]`: 코드 유닛 상수 풀 인덱스 `k`
+- `G[k]`: `global[k]`
+- `U[u]`: 현재 클로저의 upvalue 슬롯 `u`
+
 | Opcode | Format | Args | 동작 |
 | --- | --- | --- | --- |
-| MOVE | ABx | `A B` | `R[A] = R[B]` |
-| LOADNIL / LOADTRUE / LOADFALSE | ABx | `A` | 상수 로드 |
-| LOADK | ABx | `A K` | `R[A] = constants[K]` |
-| GETGLOBAL | ABx | `A K` | `R[A] = globals[constants[K]]` |
-| SETGLOBAL | ABx | `K A` | `globals[constants[K]] = R[A]` |
-| ADD/SUB/MUL/DIV/IDIV/MOD/POW | ABC | `A B C` | 산술 연산 |
-| CONCAT | ABC | `A B C` | 문자열 연결(`string/number/boolean` 허용) |
-| NEG / NOT | ABx | `A B` | 단항 연산 |
-| LEN | ABx | `A B` | 문자열 길이(바이트) |
-| AND / OR | ABC | `A B C` | bool 논리 연산 |
-| EQ/NE/LT/LE/GT/GE | ABC | `A B C` | 비교 결과(bool) 저장 |
-| BAND/BOR/BXOR/SHL/SHR | ABC | `A B C` | 비트 연산 |
-| NEWTABLE | ABx | `A` | `R[A] = {}` |
-| NEWARRAY | ABx | `A B` | `R[A] = new array(len=R[B])` |
+| LOAD | ABx | `A Bx` | `R[A] = RI[Bx]` |
+| LOADNIL / LOADTRUE / LOADFALSE | ABx | `A Bx` | `R[A] = <literal>` |
+| LOADK | ABx | `A Bx` | `R[A] = K[Bx]` |
+| GETGLOBALK | ABx | `A Bx` | `R[Bx] = G[K[A]]` |
+| SETGLOBALK | ABx | `A Bx` | `G[K[A]] = RI[Bx]` |
+| GETGLOBAL | ABx | `A Bx` | `R[Bx] = G[R[A]]` |
+| SETGLOBAL | ABx | `A Bx` | `G[R[A]] = RI[Bx]` |
+| ADD/SUB/MUL/DIV/IDIV/MOD/POW | ABC | `A B C` | `R[A] = R[B] op RI[C]` |
+| CONCAT | ABC | `A B C` | `R[A] = concat(R[B], RI[C])` |
+| NEG / NOT | ABx | `A Bx` | `R[A] = op R[Bx]` |
+| LEN | ABx | `A Bx` | `R[A] = len(R[Bx])` |
+| AND / OR | ABC | `A B C` | `R[A] = R[B] op R[C]` |
+| EQ/NE/LT/LE/GT/GE | ABC | `A B C` | `R[A] = cmp(R[B], RI[C])` |
+| BAND/BOR/BXOR/SHL/SHR | ABC | `A B C` | `R[A] = bitop(R[B], RI[C])` |
+| NEWTABLE | ABx | `A Bx` | `R[A] = {}` |
+| NEWARRAY | ABx | `A Bx` | `R[A] = [nil; RI[Bx]]` |
 | GETTABLE | ABC | `A B C` | `R[A] = R[B][R[C]]` |
-| SETTABLE | ABC | `A B C` | `R[A][R[B]] = R[C]` |
-| GETARRAY | ABC | `A B C` | `R[A] = R[B][idx(R[C])]` |
-| SETARRAY | ABC | `A B C` | `R[A][idx(R[B])] = R[C]` |
-| JMP | sAx | `rel` | 상대 점프 |
-| IFFALSY / IFTRUTHY | ABx | `A` | 조건 거짓일 때 다음 1워드 스킵 |
-| IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `B C` | 비교 거짓일 때 다음 1워드 스킵 |
-| CALL | ABC | `F argc retc` | 함수 호출 |
-| RETURN | ABx | `A retc` | `R[A..A+retc-1]` 반환 |
-| CLOSURE | ABx | `A chunk` | 클로저 생성 및 저장 |
-| GETUPVAL | ABx | `A U` | `R[A] = upvalue[U]` |
-| SETUPVAL | ABx | `U A` | `upvalue[U] = R[A]` |
+| SETTABLE | ABC | `A B C` | `R[A][R[B]] = RI[C]` |
+| GETARRAY | ABC | `A B C` | `R[A] = R[B][RI[C]]` |
+| SETARRAY | ABC | `A B C` | `R[A][R[B]] = RI[C]` |
+| GETARRAYI | ABC | `A B C` | `R[A] = R[C][I[B]]` |
+| SETARRAYI | ABC | `A B C` | `R[A][I[B]] = RI[C]` |
+| JMP | sAx | `rel` | `pc = pc + rel` |
+| IFFALSY / IFTRUTHY | ABx | `A Bx` | `if cond(R[A]) then pc = pc + 1` |
+| IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `A B C` | `if not cmp(R[B], RI[C]) then pc = pc + 1` |
+| CALL | ABC | `F argc retc` | `call(R[F], argc, retc)` |
+| RETURN | ABx | `A Bx` | `return R[A..A+Bx-1]` |
+| CLOSURE | ABx | `A Bx` | `R[A] = closure(Bx)` |
+| GETUPVAL | ABx | `A Bx` | `R[Bx] = U[A]` |
+| SETUPVAL | ABx | `A Bx` | `U[A] = RI[Bx]` |
 

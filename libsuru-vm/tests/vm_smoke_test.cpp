@@ -16,11 +16,22 @@ std::uint32_t to_u32(std::size_t v) {
 }
 
 std::uint32_t pack_abc(suru::vm::Op op, std::uint32_t a, std::uint32_t b, std::uint32_t c) {
-    return (static_cast<std::uint32_t>(op) << 26U) | ((a & 0xFFU) << 18U) | ((b & 0x1FFU) << 9U) | (c & 0x1FFU);
+    return (static_cast<std::uint32_t>(op) << 26U) | ((a & 0xFFU) << 17U) | ((b & 0xFFU) << 9U) | (c & 0x1FFU);
 }
 
-std::uint32_t pack_abx(suru::vm::Op op, std::uint32_t a, std::uint32_t bx) {
-    return (static_cast<std::uint32_t>(op) << 26U) | ((a & 0xFFU) << 18U) | (bx & 0x3FFFFU);
+std::uint32_t pack_abc_i(suru::vm::Op op, std::uint32_t a, std::uint32_t b, std::uint32_t c, bool i) {
+    return (static_cast<std::uint32_t>(op) << 26U)
+        | ((i ? 1U : 0U) << 25U)
+        | ((a & 0xFFU) << 17U)
+        | ((b & 0xFFU) << 9U)
+        | (c & 0x1FFU);
+}
+
+std::uint32_t pack_abx(suru::vm::Op op, std::uint32_t a, std::uint32_t bx, bool i = false) {
+    return (static_cast<std::uint32_t>(op) << 26U)
+        | ((i ? 1U : 0U) << 25U)
+        | ((a & 0xFFU) << 17U)
+        | (bx & 0x1FFFFU);
 }
 
 } // namespace
@@ -57,7 +68,7 @@ TEST(VmSmokeTest, ExecutesRegisterBytecodeAndWritesGlobal) {
     cu->constants_.push_back(suru::vm::Value::string(key_name));
 
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
-    cu->code_.push_back(pack_abx(suru::vm::Op::SetGlobal, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::SetGlobalK, 1, 0));
     cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 0));
 
     cu->chunks_.push_back(suru::vm::Chunk {"main", 0, to_u32(cu->code_.size()), 0, 2, {}});
@@ -165,10 +176,10 @@ TEST(VmSmokeTest, KeepsUpvalueAliveAfterOuterReturns) {
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 0));
     cu->code_.push_back(pack_abx(suru::vm::Op::Closure, 0, 1));
     cu->code_.push_back(pack_abc(suru::vm::Op::Call, 0, 0, 1));
-    cu->code_.push_back(pack_abx(suru::vm::Op::Move, 3, 0));
-    cu->code_.push_back(pack_abx(suru::vm::Op::Move, 0, 3));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Load, 3, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Load, 0, 3));
     cu->code_.push_back(pack_abc(suru::vm::Op::Call, 0, 0, 1));
-    cu->code_.push_back(pack_abx(suru::vm::Op::Move, 0, 3));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Load, 0, 3));
     cu->code_.push_back(pack_abc(suru::vm::Op::Call, 0, 0, 1));
     cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
     const std::uint32_t main_end = to_u32(cu->code_.size());
@@ -414,4 +425,176 @@ TEST(VmSmokeTest, ConcatAndLenRejectInvalidTypes) {
         vm.push_value(suru::vm::Value::closure(len_entry));
         EXPECT_THROW(vm.call(0, 0), suru::vm::TypeError);
     }
+}
+
+TEST(VmSmokeTest, SupportsImmediateOperands) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(7.0));   // R0
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+    cu->code_.push_back(pack_abc_i(suru::vm::Op::Add, 1, 0, 2, true));        // 7 + 2 = 9
+    cu->code_.push_back(pack_abc_i(suru::vm::Op::Eq, 2, 1, 9, true));         // 9 == 9
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 1, 2));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 3, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 2));
+
+    ASSERT_GE(vm.stack_top(), 2U);
+    const suru::vm::Value eq_out = vm.pop_value();
+    const suru::vm::Value add_out = vm.pop_value();
+
+    ASSERT_EQ(add_out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(add_out.number_, 9.0);
+    ASSERT_EQ(eq_out.kind, suru::vm::ValueKind::Boolean);
+    EXPECT_TRUE(eq_out.bool_);
+}
+
+TEST(VmSmokeTest, SupportsImmediateArrayOperands) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(7.0));   // value
+    cu->constants_.push_back(suru::vm::Value::number(-1.0));  // reg index
+
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 1, 4, true));        // len immediate 4
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 1));                 // -1
+    cu->code_.push_back(pack_abc(suru::vm::Op::SetArray, 1, 2, 0));           // arr[-1] = 7
+    cu->code_.push_back(pack_abc_i(suru::vm::Op::GetArray, 3, 1, 0x1FFU, true)); // arr[#-1]
+    cu->code_.push_back(pack_abx(suru::vm::Op::Len, 4, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 3, 2));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 5, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 2));
+
+    ASSERT_GE(vm.stack_top(), 2U);
+    const suru::vm::Value len_out = vm.pop_value();
+    const suru::vm::Value get_out = vm.pop_value();
+    ASSERT_EQ(get_out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(get_out.number_, 7.0);
+    ASSERT_EQ(len_out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(len_out.number_, 4.0);
+}
+
+TEST(VmSmokeTest, SupportsSetGlobalKImmediate) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    suru::vm::String* key = vm.make_string("imm_global");
+    ASSERT_NE(key, nullptr);
+    cu->constants_.push_back(suru::vm::Value::string(key));
+
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::SetGlobalK, 0, 123, true));
+    cu->code_.push_back(pack_abx(suru::vm::Op::GetGlobalK, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 1, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    ASSERT_EQ(out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(out.number_, 123.0);
+}
+
+TEST(VmSmokeTest, SupportsSetUpvalueImmediate) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(1.0));
+
+    const std::uint32_t main_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Closure, 0, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Call, 0, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t main_end = to_u32(cu->code_.size());
+
+    const std::uint32_t inner_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::SetUpvalue, 0, 101, true));
+    cu->code_.push_back(pack_abx(suru::vm::Op::GetUpvalue, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t inner_end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 2, {}});
+    cu->chunks_.push_back(
+        suru::vm::Chunk {
+            "inner",
+            inner_begin,
+            inner_end,
+            0,
+            1,
+            {{suru::vm::UpvalueSource::Local, 1}},
+        }
+    );
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    ASSERT_EQ(out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(out.number_, 101.0);
+}
+
+TEST(VmSmokeTest, SupportsRegisterGlobalAndArrayI) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    suru::vm::String* key = vm.make_string("x");
+    ASSERT_NE(key, nullptr);
+    cu->constants_.push_back(suru::vm::Value::string(key));
+
+    const std::uint32_t begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));                    // R0 = "x"
+    cu->code_.push_back(pack_abx(suru::vm::Op::SetGlobal, 0, 123, true));        // G[R0] = #123
+    cu->code_.push_back(pack_abx(suru::vm::Op::GetGlobal, 0, 1));                // R1 = G[R0]
+    cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 2, 3, true));           // R2 = newarray(3)
+    cu->code_.push_back(pack_abc_i(suru::vm::Op::SetArrayI, 2, 0xFFU, 77, true)); // R2[I[-1]] = #77
+    cu->code_.push_back(pack_abc(suru::vm::Op::GetArrayI, 3, 0xFFU, 2));         // R3 = R2[I[-1]]
+    cu->code_.push_back(pack_abx(suru::vm::Op::Len, 4, 2));                       // R4 = len(R2)
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 1, 4));
+    const std::uint32_t end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 5, {}});
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 4));
+
+    ASSERT_GE(vm.stack_top(), 4U);
+    const suru::vm::Value len_out = vm.pop_value();
+    const suru::vm::Value arr_out = vm.pop_value();
+    const suru::vm::Value array_out = vm.pop_value();
+    const suru::vm::Value global_out = vm.pop_value();
+    ASSERT_EQ(global_out.kind, suru::vm::ValueKind::Number);
+    ASSERT_EQ(array_out.kind, suru::vm::ValueKind::Array);
+    ASSERT_EQ(arr_out.kind, suru::vm::ValueKind::Number);
+    ASSERT_EQ(len_out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(global_out.number_, 123.0);
+    EXPECT_EQ(arr_out.number_, 77.0);
+    EXPECT_EQ(len_out.number_, 3.0);
 }

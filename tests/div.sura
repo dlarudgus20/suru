@@ -7,16 +7,16 @@ k_7 = number 7
 k_3 = number 3
 
 .chunk main 0 8
-GETGLOBAL 0 k_div
+GETGLOBALK k_div 0
 LOADK 1 k_7
 LOADK 2 k_3
 CALL 0 2 2
-GETGLOBAL 3 k_print
+GETGLOBALK k_print 3
 LOADK 4 k_msg_q
-MOVE 5 0
+LOAD 5 0
 CALL 3 2 0
-GETGLOBAL 3 k_print
+GETGLOBALK k_print 3
 LOADK 4 k_msg_r
-MOVE 5 1
+LOAD 5 1
 CALL 3 2 0
 RETURN 0 0

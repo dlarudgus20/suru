@@ -1,0 +1,42 @@
+.const
+k_print = string "print"
+k_7 = number 7
+k_3 = number 3
+k_m1 = number -1
+k_dyn = string "imm_dyn"
+
+.chunk main 0 12
+LOADK 0 k_7
+ADD 1 0 #2
+EQ 2 1 #9
+LOADK 3 k_3
+NEWARRAY 4 3
+NEWARRAY 5 #4
+LOADK 6 k_m1
+SETARRAY 5 6 0
+GETARRAY 7 5 #-1
+LEN 8 5
+GETGLOBALK k_print 9
+LOAD 0 9
+CALL 0 1 0
+GETGLOBALK k_print 0
+LOAD 1 2
+CALL 0 1 0
+GETGLOBALK k_print 0
+LOAD 1 7
+CALL 0 1 0
+GETGLOBALK k_print 0
+LOAD 1 8
+CALL 0 1 0
+LOADK 10 k_dyn
+SETGLOBAL 10 #321
+GETGLOBAL 10 11
+GETGLOBALK k_print 0
+LOAD 1 11
+CALL 0 1 0
+SETARRAYI 5 -1 #88
+GETARRAYI 7 -1 5
+GETGLOBALK k_print 0
+LOAD 1 7
+CALL 0 1 0
+RETURN 0 0

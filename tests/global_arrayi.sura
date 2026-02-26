@@ -1,0 +1,18 @@
+.const
+k_print = string "print"
+k_key = string "demo"
+
+.chunk main 0 8
+LOADK 0 k_key
+SETGLOBAL 0 #123
+GETGLOBAL 0 1
+GETGLOBALK k_print 2
+LOAD 3 1
+CALL 2 1 0
+NEWARRAY 4 #3
+SETARRAYI 4 -1 #77
+GETARRAYI 5 -1 4
+LOAD 3 5
+CALL 2 1 0
+RETURN 0 0
+

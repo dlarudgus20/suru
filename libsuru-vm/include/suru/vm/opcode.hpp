@@ -5,15 +5,15 @@
 namespace suru::vm {
 
 enum class Op : std::uint8_t {
-    Move = 0,
+    Load = 0,
 
     LoadNil = 1,
     LoadTrue = 2,
     LoadFalse = 3,
     LoadK = 4,
 
-    GetGlobal = 5,
-    SetGlobal = 6,
+    GetGlobalK = 5,
+    SetGlobalK = 6,
 
     Add = 7,
     Sub = 8,
@@ -64,6 +64,10 @@ enum class Op : std::uint8_t {
     Closure = 48,
     GetUpvalue = 49,
     SetUpvalue = 50,
+    GetGlobal = 51,
+    SetGlobal = 52,
+    GetArrayI = 53,
+    SetArrayI = 54,
 };
 
 } // namespace suru::vm

@@ -20,7 +20,9 @@
 namespace {
 
 constexpr std::uint32_t kOpShift = 26U;
-constexpr std::uint32_t kAxMask = 0x3FFFFFFU;
+constexpr std::uint32_t kIShift = 25U;
+constexpr std::uint32_t kIMask = 0x1U;
+constexpr std::uint32_t kAxMask = 0x1FFFFFFU;
 
 struct AsmError : std::runtime_error {
     int line;
@@ -145,6 +147,20 @@ std::uint64_t parse_u64(std::string_view text, int line, std::string_view what) 
     return static_cast<std::uint64_t>(value);
 }
 
+std::int64_t parse_i64(std::string_view text, int line, std::string_view what) {
+    std::size_t pos = 0;
+    long long value = 0;
+    try {
+        value = std::stoll(std::string(text), &pos, 10);
+    } catch (...) {
+        throw AsmError(line, std::string("invalid ") + std::string(what));
+    }
+    if (pos != text.size()) {
+        throw AsmError(line, std::string("invalid ") + std::string(what));
+    }
+    return static_cast<std::int64_t>(value);
+}
+
 std::uint32_t checked_u32(std::uint64_t value, int line, std::string_view what) {
     if (value > std::numeric_limits<std::uint32_t>::max()) {
         throw AsmError(line, std::string(what) + " out of uint32 range");
@@ -167,27 +183,62 @@ std::uint16_t checked_u9(std::uint64_t value, int line, std::string_view what) {
 }
 
 std::uint32_t checked_u18(std::uint64_t value, int line, std::string_view what) {
-    if (value > 0x3FFFFU) {
-        throw AsmError(line, std::string(what) + " out of 18-bit range");
+    if (value > 0x1FFFFU) {
+        throw AsmError(line, std::string(what) + " out of 17-bit range");
     }
     return static_cast<std::uint32_t>(value);
 }
 
+std::uint32_t checked_s9_bits(std::int64_t value, int line, std::string_view what) {
+    if (value < -256 || value > 255) {
+        throw AsmError(line, std::string(what) + " out of signed 9-bit range");
+    }
+    return static_cast<std::uint32_t>(static_cast<std::int32_t>(value)) & 0x1FFU;
+}
+
+std::uint32_t checked_s17_bits(std::int64_t value, int line, std::string_view what) {
+    if (value < -65536 || value > 65535) {
+        throw AsmError(line, std::string(what) + " out of signed 17-bit range");
+    }
+    return static_cast<std::uint32_t>(static_cast<std::int32_t>(value)) & 0x1FFFFU;
+}
+
+std::uint32_t checked_s8_bits(std::int64_t value, int line, std::string_view what) {
+    if (value < -128 || value > 127) {
+        throw AsmError(line, std::string(what) + " out of signed 8-bit range");
+    }
+    return static_cast<std::uint32_t>(static_cast<std::int32_t>(value)) & 0xFFU;
+}
+
 std::int32_t checked_s26(std::int64_t value, int line, std::string_view what) {
-    constexpr std::int64_t kMin = -(1LL << 25);
-    constexpr std::int64_t kMax = (1LL << 25) - 1;
+    constexpr std::int64_t kMin = -(1LL << 24);
+    constexpr std::int64_t kMax = (1LL << 24) - 1;
     if (value < kMin || value > kMax) {
-        throw AsmError(line, std::string(what) + " out of signed 26-bit range");
+        throw AsmError(line, std::string(what) + " out of signed 25-bit range");
     }
     return static_cast<std::int32_t>(value);
 }
 
 std::uint32_t pack_abc(suru::vm::Op op, std::uint32_t a, std::uint32_t b, std::uint32_t c) {
-    return (static_cast<std::uint32_t>(op) << kOpShift) | ((a & 0xFFU) << 18U) | ((b & 0x1FFU) << 9U) | (c & 0x1FFU);
+    return (static_cast<std::uint32_t>(op) << kOpShift)
+        | ((a & 0xFFU) << 17U)
+        | ((b & 0xFFU) << 9U)
+        | (c & 0x1FFU);
 }
 
-std::uint32_t pack_abx(suru::vm::Op op, std::uint32_t a, std::uint32_t bx) {
-    return (static_cast<std::uint32_t>(op) << kOpShift) | ((a & 0xFFU) << 18U) | (bx & 0x3FFFFU);
+std::uint32_t pack_abc_i(suru::vm::Op op, std::uint32_t a, std::uint32_t b, std::uint32_t c, bool i) {
+    return (static_cast<std::uint32_t>(op) << kOpShift)
+        | ((i ? kIMask : 0U) << kIShift)
+        | ((a & 0xFFU) << 17U)
+        | ((b & 0xFFU) << 9U)
+        | (c & 0x1FFU);
+}
+
+std::uint32_t pack_abx(suru::vm::Op op, std::uint32_t a, std::uint32_t bx, bool i = false) {
+    return (static_cast<std::uint32_t>(op) << kOpShift)
+        | ((i ? kIMask : 0U) << kIShift)
+        | ((a & 0xFFU) << 17U)
+        | (bx & 0x1FFFFU);
 }
 
 std::uint32_t pack_sax(suru::vm::Op op, std::int32_t sx) {
@@ -200,11 +251,13 @@ suru::vm::Op parse_op(std::string_view op, int line) {
     }
 
     static const std::unordered_map<std::string, suru::vm::Op> kOps {
-        {"MOVE", suru::vm::Op::Move},
+        {"LOAD", suru::vm::Op::Load},
         {"LOADNIL", suru::vm::Op::LoadNil},
         {"LOADTRUE", suru::vm::Op::LoadTrue},
         {"LOADFALSE", suru::vm::Op::LoadFalse},
         {"LOADK", suru::vm::Op::LoadK},
+        {"GETGLOBALK", suru::vm::Op::GetGlobalK},
+        {"SETGLOBALK", suru::vm::Op::SetGlobalK},
         {"GETGLOBAL", suru::vm::Op::GetGlobal},
         {"SETGLOBAL", suru::vm::Op::SetGlobal},
         {"ADD", suru::vm::Op::Add},
@@ -237,6 +290,8 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"NEWARRAY", suru::vm::Op::NewArray},
         {"GETARRAY", suru::vm::Op::GetArray},
         {"SETARRAY", suru::vm::Op::SetArray},
+        {"GETARRAYI", suru::vm::Op::GetArrayI},
+        {"SETARRAYI", suru::vm::Op::SetArrayI},
         {"JMP", suru::vm::Op::Jmp},
         {"IFFALSY", suru::vm::Op::IfFalsy},
         {"IFTRUTHY", suru::vm::Op::IfTruthy},
@@ -282,54 +337,171 @@ std::uint32_t emit_word(
 ) {
     const suru::vm::Op op = parse_op(inst.op, inst.line);
 
+    auto is_immediate = [](std::string_view tok) {
+        return !tok.empty() && tok.front() == '#';
+    };
+
+    auto parse_immediate = [&](std::string_view tok, std::string_view what) {
+        if (!is_immediate(tok)) {
+            throw AsmError(inst.line, std::string("expected immediate for ") + std::string(what));
+        }
+        if (tok.size() == 1) {
+            throw AsmError(inst.line, std::string("missing immediate value for ") + std::string(what));
+        }
+        return parse_i64(tok.substr(1), inst.line, what);
+    };
+
+    auto immediate_enabled_abc = [&](suru::vm::Op v) {
+        switch (v) {
+            case suru::vm::Op::Add:
+            case suru::vm::Op::Sub:
+            case suru::vm::Op::Mul:
+            case suru::vm::Op::Div:
+            case suru::vm::Op::Idiv:
+            case suru::vm::Op::Mod:
+            case suru::vm::Op::Pow:
+            case suru::vm::Op::Concat:
+            case suru::vm::Op::Eq:
+            case suru::vm::Op::Ne:
+            case suru::vm::Op::Lt:
+            case suru::vm::Op::Le:
+            case suru::vm::Op::Gt:
+            case suru::vm::Op::Ge:
+            case suru::vm::Op::Band:
+            case suru::vm::Op::Bor:
+            case suru::vm::Op::Bxor:
+            case suru::vm::Op::Shl:
+            case suru::vm::Op::Shr:
+            case suru::vm::Op::GetArray:
+            case suru::vm::Op::SetArray:
+            case suru::vm::Op::SetTable:
+            case suru::vm::Op::IfEq:
+            case suru::vm::Op::IfNe:
+            case suru::vm::Op::IfLt:
+            case suru::vm::Op::IfLe:
+            case suru::vm::Op::IfGt:
+            case suru::vm::Op::IfGe:
+            case suru::vm::Op::SetArrayI:
+                return true;
+            default:
+                return false;
+        }
+    };
+
+    auto parse_i8_immediate = [&](std::string_view tok, std::string_view what) {
+        if (!tok.empty() && tok.front() == '#') {
+            if (tok.size() == 1) {
+                throw AsmError(inst.line, std::string("missing immediate value for ") + std::string(what));
+            }
+            return checked_s8_bits(parse_i64(tok.substr(1), inst.line, what), inst.line, what);
+        }
+        return checked_s8_bits(parse_i64(tok, inst.line, what), inst.line, what);
+    };
+
     auto parse_reg8 = [&](std::string_view tok, std::string_view what) {
+        if (is_immediate(tok)) {
+            throw AsmError(inst.line, std::string(what) + " does not accept immediate");
+        }
         return static_cast<std::uint32_t>(checked_u8(parse_u64(tok, inst.line, what), inst.line, what));
     };
     auto parse_reg9 = [&](std::string_view tok, std::string_view what) {
+        if (is_immediate(tok)) {
+            throw AsmError(inst.line, std::string(what) + " does not accept immediate");
+        }
         return static_cast<std::uint32_t>(checked_u9(parse_u64(tok, inst.line, what), inst.line, what));
     };
 
     switch (op) {
-        case suru::vm::Op::Move:
+        case suru::vm::Op::Load:
         case suru::vm::Op::Neg:
         case suru::vm::Op::Not:
-        case suru::vm::Op::Len:
+        case suru::vm::Op::Len: {
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "opcode requires two operands");
+            }
+            const std::uint32_t a = parse_reg8(inst.args[0], "register");
+            if (op == suru::vm::Op::Load && is_immediate(inst.args[1])) {
+                const std::uint32_t imm = checked_s17_bits(parse_immediate(inst.args[1], "immediate"), inst.line, "immediate");
+                return pack_abx(op, a, imm, true);
+            }
+            return pack_abx(op, a, checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register"));
+        }
         case suru::vm::Op::NewArray: {
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
-            return pack_abx(op, parse_reg8(inst.args[0], "register"), checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register"));
+            const std::uint32_t a = parse_reg8(inst.args[0], "register");
+            if (is_immediate(inst.args[1])) {
+                const std::uint32_t imm = checked_s17_bits(parse_immediate(inst.args[1], "immediate"), inst.line, "immediate");
+                return pack_abx(op, a, imm, true);
+            }
+            return pack_abx(op, a, checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register"));
         }
         case suru::vm::Op::GetUpvalue: {
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "GETUPVAL requires two operands");
             }
-            return pack_abx(op, parse_reg8(inst.args[0], "register"), checked_u18(parse_u64(inst.args[1], inst.line, "upvalue index"), inst.line, "upvalue index"));
+            const std::uint32_t upvalue = checked_u8(parse_u64(inst.args[0], inst.line, "upvalue index"), inst.line, "upvalue index");
+            const std::uint32_t dst = parse_reg8(inst.args[1], "register");
+            return pack_abx(op, upvalue, dst);
         }
         case suru::vm::Op::SetUpvalue: {
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "SETUPVAL requires two operands");
             }
-            const std::uint32_t upvalue = checked_u18(parse_u64(inst.args[0], inst.line, "upvalue index"), inst.line, "upvalue index");
-            const std::uint32_t a = parse_reg8(inst.args[1], "register");
-            return pack_abx(op, a, upvalue);
+            const std::uint32_t upvalue = checked_u8(parse_u64(inst.args[0], inst.line, "upvalue index"), inst.line, "upvalue index");
+            if (is_immediate(inst.args[1])) {
+                const std::uint32_t imm = checked_s17_bits(parse_immediate(inst.args[1], "immediate"), inst.line, "immediate");
+                return pack_abx(op, upvalue, imm, true);
+            }
+            const std::uint32_t src = checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register");
+            return pack_abx(op, upvalue, src);
         }
         case suru::vm::Op::LoadK:
-        case suru::vm::Op::GetGlobal: {
+        case suru::vm::Op::GetGlobalK: {
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
-            const std::uint32_t a = parse_reg8(inst.args[0], "register");
-            const std::uint32_t idx = checked_u18(resolve_index(inst.args[1], inst.line, "index", const_index), inst.line, "index");
-            return pack_abx(op, a, idx);
+            if (op == suru::vm::Op::LoadK) {
+                const std::uint32_t a = parse_reg8(inst.args[0], "register");
+                const std::uint32_t idx = checked_u18(resolve_index(inst.args[1], inst.line, "index", const_index), inst.line, "index");
+                return pack_abx(op, a, idx);
+            }
+            const std::uint32_t key = checked_u8(resolve_index(inst.args[0], inst.line, "index", const_index), inst.line, "index");
+            const std::uint32_t dst = checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register");
+            return pack_abx(op, key, dst);
+        }
+        case suru::vm::Op::SetGlobalK: {
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "SETGLOBALK requires two operands");
+            }
+            const std::uint32_t key = checked_u8(resolve_index(inst.args[0], inst.line, "index", const_index), inst.line, "index");
+            if (is_immediate(inst.args[1])) {
+                const std::uint32_t imm = checked_s17_bits(parse_immediate(inst.args[1], "immediate"), inst.line, "immediate");
+                return pack_abx(op, key, imm, true);
+            }
+            const std::uint32_t src = checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register");
+            return pack_abx(op, key, src);
+        }
+        case suru::vm::Op::GetGlobal: {
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "GETGLOBAL requires two operands");
+            }
+            const std::uint32_t key_reg = parse_reg8(inst.args[0], "register");
+            const std::uint32_t dst = checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register");
+            return pack_abx(op, key_reg, dst);
         }
         case suru::vm::Op::SetGlobal: {
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "SETGLOBAL requires two operands");
             }
-            const std::uint32_t idx = checked_u18(resolve_index(inst.args[0], inst.line, "index", const_index), inst.line, "index");
-            const std::uint32_t a = parse_reg8(inst.args[1], "register");
-            return pack_abx(op, a, idx);
+            const std::uint32_t key_reg = parse_reg8(inst.args[0], "register");
+            if (is_immediate(inst.args[1])) {
+                const std::uint32_t imm = checked_s17_bits(parse_immediate(inst.args[1], "immediate"), inst.line, "immediate");
+                return pack_abx(op, key_reg, imm, true);
+            }
+            const std::uint32_t src = checked_u18(parse_u64(inst.args[1], inst.line, "register"), inst.line, "register");
+            return pack_abx(op, key_reg, src);
         }
         case suru::vm::Op::Closure: {
             if (inst.args.size() != 2) {
@@ -379,12 +551,35 @@ std::uint32_t emit_word(
             if (inst.args.size() != 3) {
                 throw AsmError(inst.line, "opcode requires three operands");
             }
-            return pack_abc(
+            const std::uint32_t a = parse_reg8(inst.args[0], "operand A");
+            const std::uint32_t b = parse_reg8(inst.args[1], "operand B");
+            if (is_immediate(inst.args[2])) {
+                if (!immediate_enabled_abc(op)) {
+                    throw AsmError(inst.line, "immediate is not supported for this opcode");
+                }
+                const std::uint32_t imm = checked_s9_bits(parse_immediate(inst.args[2], "immediate"), inst.line, "immediate");
+                return pack_abc_i(op, a, b, imm, true);
+            }
+            return pack_abc_i(
                 op,
-                parse_reg8(inst.args[0], "operand A"),
-                parse_reg9(inst.args[1], "operand B"),
-                parse_reg9(inst.args[2], "operand C")
+                a,
+                b,
+                parse_reg9(inst.args[2], "operand C"),
+                false
             );
+        }
+        case suru::vm::Op::GetArrayI:
+        case suru::vm::Op::SetArrayI: {
+            if (inst.args.size() != 3) {
+                throw AsmError(inst.line, "opcode requires three operands");
+            }
+            const std::uint32_t a = parse_reg8(inst.args[0], "operand A");
+            const std::uint32_t b = parse_i8_immediate(inst.args[1], "operand B");
+            if (op == suru::vm::Op::SetArrayI && is_immediate(inst.args[2])) {
+                const std::uint32_t imm = checked_s9_bits(parse_immediate(inst.args[2], "immediate"), inst.line, "immediate");
+                return pack_abc_i(op, a, b, imm, true);
+            }
+            return pack_abc_i(op, a, b, parse_reg9(inst.args[2], "operand C"), false);
         }
         case suru::vm::Op::IfEq:
         case suru::vm::Op::IfNe:
@@ -395,7 +590,12 @@ std::uint32_t emit_word(
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "skip compare opcode requires two operands");
             }
-            return pack_abc(op, 0, parse_reg9(inst.args[0], "operand B"), parse_reg9(inst.args[1], "operand C"));
+            const std::uint32_t b = parse_reg8(inst.args[0], "operand B");
+            if (is_immediate(inst.args[1])) {
+                const std::uint32_t imm = checked_s9_bits(parse_immediate(inst.args[1], "immediate"), inst.line, "immediate");
+                return pack_abc_i(op, 0, b, imm, true);
+            }
+            return pack_abc_i(op, 0, b, parse_reg9(inst.args[1], "operand C"), false);
         }
         case suru::vm::Op::Return: {
             if (inst.args.size() != 2) {
@@ -441,7 +641,7 @@ void print_help(std::ostream& out) {
         << "    k0 = number 1\n"
         << "    k1 = string \"print\"\n"
         << "  .chunk main 0 4\n"
-        << "    GETGLOBAL 0 k1\n"
+        << "    GETGLOBALK k1 0\n"
         << "    CLOSURE 1 foo\n"
         << "    CALL 1 0 1\n"
         << "    CALL 0 1 0\n"
