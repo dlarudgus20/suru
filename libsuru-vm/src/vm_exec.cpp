@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -49,12 +50,19 @@ std::int64_t require_integer(Value value, std::string_view where) {
     return static_cast<std::int64_t>(number);
 }
 
-std::uint64_t read_uleb(const CodeUnit& cu, std::size_t code_end, std::size_t& pc) {
+std::uint32_t to_u32(std::size_t value, std::string_view where) {
+    if (value > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error(std::string(where) + ": exceeds uint32 range");
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+std::uint64_t read_u_raw(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
     std::uint64_t value = 0;
     int shift = 0;
     while (true) {
-        if (pc >= code_end || pc >= cu.opcodes_.size()) {
-            throw std::runtime_error("truncated uleb128");
+        if (pc >= code_end || static_cast<std::size_t>(pc) >= cu.opcodes_.size()) {
+            throw std::runtime_error("truncated integer operand");
         }
         const std::uint8_t byte = cu.opcodes_[pc++];
         value |= static_cast<std::uint64_t>(byte & 0x7fU) << shift;
@@ -63,52 +71,55 @@ std::uint64_t read_uleb(const CodeUnit& cu, std::size_t code_end, std::size_t& p
         }
         shift += 7;
         if (shift > 63) {
-            throw std::runtime_error("uleb128 overflow");
+            throw std::runtime_error("integer operand overflow");
         }
     }
 }
 
-std::int64_t read_sleb(const CodeUnit& cu, std::size_t code_end, std::size_t& pc) {
-    std::int64_t value = 0;
-    int shift = 0;
-    std::uint8_t byte = 0;
-    while (true) {
-        if (pc >= code_end || pc >= cu.opcodes_.size()) {
-            throw std::runtime_error("truncated sleb128");
-        }
-        byte = cu.opcodes_[pc++];
-        value |= static_cast<std::int64_t>(byte & 0x7fU) << shift;
-        shift += 7;
-        if ((byte & 0x80U) == 0U) {
-            break;
-        }
-        if (shift > 63) {
-            throw std::runtime_error("sleb128 overflow");
-        }
+std::uint8_t read_u8(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
+    const std::uint64_t value = read_u_raw(cu, code_end, pc);
+    if (value > std::numeric_limits<std::uint8_t>::max()) {
+        throw std::runtime_error("integer operand exceeds uint8 range");
     }
-
-    if (shift < 64 && (byte & 0x40U) != 0U) {
-        value |= ~((static_cast<std::int64_t>(1) << shift) - 1);
-    }
-    return value;
+    return static_cast<std::uint8_t>(value);
 }
 
-Value reg_read(std::size_t base, std::size_t limit, const std::vector<Value>& stack, std::size_t index) {
-    const std::size_t at = base + index;
-    if (at >= limit) {
+std::uint32_t read_u32(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
+    const std::uint64_t value = read_u_raw(cu, code_end, pc);
+    if (value > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("integer operand exceeds uint32 range");
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+std::int16_t read_i16(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
+    if (pc + 1U >= code_end || static_cast<std::size_t>(pc + 1U) >= cu.opcodes_.size()) {
+        throw std::runtime_error("truncated int16");
+    }
+    const std::uint16_t lo = cu.opcodes_[pc];
+    const std::uint16_t hi = cu.opcodes_[pc + 1U];
+    pc += 2U;
+    return static_cast<std::int16_t>((hi << 8U) | lo);
+}
+
+Value reg_read(std::uint32_t base, std::uint32_t limit, const std::vector<Value>& stack, std::uint8_t index) {
+    const std::uint32_t at32 = base + index;
+    if (at32 >= limit) {
         throw std::runtime_error("register index out of bounds");
     }
+    const std::size_t at = static_cast<std::size_t>(at32);
     if (at >= stack.size()) {
         throw std::runtime_error("register read out of stack bounds");
     }
     return stack[at];
 }
 
-void reg_write(std::size_t base, std::size_t limit, std::vector<Value>& stack, std::size_t index, Value value) {
-    const std::size_t at = base + index;
-    if (at >= limit) {
+void reg_write(std::uint32_t base, std::uint32_t limit, std::vector<Value>& stack, std::uint8_t index, Value value) {
+    const std::uint32_t at32 = base + index;
+    if (at32 >= limit) {
         throw std::runtime_error("register index out of bounds");
     }
+    const std::size_t at = static_cast<std::size_t>(at32);
     if (at >= stack.size()) {
         throw std::runtime_error("register write out of stack bounds");
     }
@@ -118,35 +129,35 @@ void reg_write(std::size_t base, std::size_t limit, std::vector<Value>& stack, s
 } // namespace
 
 void VM::finish_frame_return(
-    std::size_t frame_base,
-    std::size_t expected,
-    std::size_t result_begin,
-    std::size_t result_end
+    std::uint32_t frame_base,
+    std::uint8_t expected,
+    std::uint32_t result_begin,
+    std::uint32_t result_end
 ) {
     if (i_stack_.empty()) {
         throw std::runtime_error("call stack is not initialized");
     }
-    if (result_begin > result_end || result_end > v_stack_.size()) {
+    if (result_begin > result_end || static_cast<std::size_t>(result_end) > v_stack_.size()) {
         throw std::runtime_error("invalid return result range");
     }
 
     CallFrame& caller = i_stack_.back();
-    const std::size_t available = result_end - result_begin;
-    const std::size_t emit = (available < expected) ? available : expected;
+    const std::uint32_t available = result_end - result_begin;
+    const std::uint8_t emit = (available < expected) ? static_cast<std::uint8_t>(available) : expected;
 
     if (caller.closure != nullptr && caller.closure->code != nullptr) {
         if (caller.call_retc != expected) {
             throw std::runtime_error("call return count mismatch");
         }
-        const std::size_t caller_limit = frame_base;
+        const std::uint32_t caller_limit = frame_base;
         if (caller.base + caller.call_dst + expected > caller_limit) {
             throw std::runtime_error("call return range out of bounds");
         }
-        for (std::size_t i = 0; i < emit; ++i) {
-            reg_write(caller.base, caller_limit, v_stack_, caller.call_dst + i, v_stack_[result_begin + i]);
+        for (std::uint8_t i = 0; i < emit; ++i) {
+            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint8_t>(caller.call_dst + i), v_stack_[result_begin + i]);
         }
-        for (std::size_t i = emit; i < expected; ++i) {
-            reg_write(caller.base, caller_limit, v_stack_, caller.call_dst + i, Value::nil());
+        for (std::uint8_t i = emit; i < expected; ++i) {
+            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint8_t>(caller.call_dst + i), Value::nil());
         }
         v_stack_.resize(frame_base);
         caller.call_dst = 0;
@@ -154,29 +165,29 @@ void VM::finish_frame_return(
         return;
     }
 
-    for (std::size_t i = 0; i < emit; ++i) {
+    for (std::uint8_t i = 0; i < emit; ++i) {
         v_stack_[frame_base + i] = v_stack_[result_begin + i];
     }
     v_stack_.resize(frame_base + expected);
-    for (std::size_t i = emit; i < expected; ++i) {
+    for (std::uint8_t i = emit; i < expected; ++i) {
         v_stack_[frame_base + i] = Value::nil();
     }
 }
 
-void VM::make_call_frame(std::size_t arg_count, std::size_t ret_slots) {
-    if (v_stack_.size() < arg_count + 1U) {
+void VM::make_call_frame(std::uint8_t arg_count, std::uint8_t ret_slots) {
+    if (v_stack_.size() < static_cast<std::size_t>(arg_count) + 1U) {
         throw std::runtime_error("call stack underflow");
     }
 
-    const std::size_t callee_index = v_stack_.size() - arg_count - 1U;
+    const std::size_t callee_index = v_stack_.size() - static_cast<std::size_t>(arg_count) - 1U;
     Closure* callee = require_closure(v_stack_[callee_index], "call");
 
     if (callee->code == nullptr) {
-        for (std::size_t i = 0; i < arg_count; ++i) {
+        for (std::uint8_t i = 0; i < arg_count; ++i) {
             v_stack_[callee_index + i] = v_stack_[callee_index + 1U + i];
         }
         v_stack_.resize(v_stack_.size() - 1U);
-        i_stack_.push_back(CallFrame {callee, 0, callee_index, 0, ret_slots, 0, 0});
+        i_stack_.push_back(CallFrame {callee, 0, to_u32(callee_index, "frame base"), 0, ret_slots, 0, 0});
         return;
     }
 
@@ -188,21 +199,22 @@ void VM::make_call_frame(std::size_t arg_count, std::size_t ret_slots) {
         throw std::runtime_error("chunk arity exceeds slots");
     }
 
-    const std::size_t copied = (arg_count < callee_chunk.arity) ? arg_count : callee_chunk.arity;
-    for (std::size_t i = 0; i < copied; ++i) {
+    const std::uint8_t copied = (arg_count < callee_chunk.arity) ? arg_count : callee_chunk.arity;
+    for (std::uint8_t i = 0; i < copied; ++i) {
         v_stack_[callee_index + i] = v_stack_[callee_index + 1U + i];
     }
 
-    const std::size_t new_size = callee_index + callee_chunk.slots;
+    const std::size_t new_size = callee_index + static_cast<std::size_t>(callee_chunk.slots);
     const std::size_t clear_end = (new_size < v_stack_.size()) ? new_size : v_stack_.size();
-    for (std::size_t at = callee_index + copied; at < clear_end; ++at) {
+    for (std::size_t at = callee_index + static_cast<std::size_t>(copied); at < clear_end; ++at) {
         v_stack_[at] = Value::nil();
     }
     v_stack_.resize(new_size, Value::nil());
+
     i_stack_.push_back(CallFrame {
         callee,
         callee_chunk.code_begin,
-        callee_index,
+        to_u32(callee_index, "frame base"),
         callee_chunk.code_end,
         ret_slots,
         0,
@@ -219,8 +231,8 @@ void VM::run_c_frame() {
         throw std::runtime_error("c closure has null function");
     }
 
-    const std::size_t frame_base = i_stack_.back().base;
-    const std::size_t expected = i_stack_.back().ret_slots;
+    const std::uint32_t frame_base = i_stack_.back().base;
+    const std::uint8_t expected = i_stack_.back().ret_slots;
     const std::size_t produced_base = v_stack_.size();
 
     current->cfunc(this);
@@ -236,7 +248,12 @@ void VM::run_c_frame() {
 
     const std::size_t result_end = v_stack_.size();
     i_stack_.pop_back();
-    finish_frame_return(frame_base, expected, result_begin, result_end);
+    finish_frame_return(
+        frame_base,
+        expected,
+        to_u32(result_begin, "result begin"),
+        to_u32(result_end, "result end")
+    );
 }
 
 void VM::run(std::size_t target_depth) {
@@ -253,41 +270,40 @@ void VM::run(std::size_t target_depth) {
         }
 
         CodeUnit* cu = current->code;
-        const std::size_t frame_limit = v_stack_.size();
+        const std::uint32_t frame_limit = to_u32(v_stack_.size(), "frame limit");
         if (frame.pc >= frame.code_end) {
             throw std::runtime_error("unexpected end of chunk");
         }
-
-        if (frame.pc >= cu->opcodes_.size()) {
+        if (static_cast<std::size_t>(frame.pc) >= cu->opcodes_.size()) {
             throw std::runtime_error("program counter out of bytecode bounds");
         }
 
         const Op op = static_cast<Op>(cu->opcodes_[frame.pc++]);
         switch (op) {
             case Op::Move: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
                 reg_write(frame.base, frame_limit, v_stack_, a, reg_read(frame.base, frame_limit, v_stack_, b));
                 break;
             }
             case Op::LoadNil: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
                 reg_write(frame.base, frame_limit, v_stack_, a, Value::nil());
                 break;
             }
             case Op::LoadTrue: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
                 reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(true));
                 break;
             }
             case Op::LoadFalse: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
                 reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(false));
                 break;
             }
             case Op::LoadK: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t k = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t k = read_u32(*cu, frame.code_end, frame.pc);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("constant index out of bounds");
                 }
@@ -295,8 +311,8 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::GetGlobal: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t k = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t k = read_u32(*cu, frame.code_end, frame.pc);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
@@ -312,8 +328,8 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::SetGlobal: {
-                const std::size_t k = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint32_t k = read_u32(*cu, frame.code_end, frame.pc);
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
@@ -347,9 +363,9 @@ void VM::run(std::size_t target_depth) {
             case Op::Ge:
             case Op::And:
             case Op::Or: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t c = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t c = read_u8(*cu, frame.code_end, frame.pc);
                 const Value lhs_v = reg_read(frame.base, frame_limit, v_stack_, b);
                 const Value rhs_v = reg_read(frame.base, frame_limit, v_stack_, c);
 
@@ -412,8 +428,8 @@ void VM::run(std::size_t target_depth) {
             }
             case Op::Neg:
             case Op::Not: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
                 const Value input = reg_read(frame.base, frame_limit, v_stack_, b);
                 if (op == Op::Neg) {
                     reg_write(frame.base, frame_limit, v_stack_, a, Value::number(-require_number(input, "neg")));
@@ -423,14 +439,14 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::NewTable: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
                 reg_write(frame.base, frame_limit, v_stack_, a, Value::table(make_table()));
                 break;
             }
             case Op::GetTable: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t c = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t c = read_u8(*cu, frame.code_end, frame.pc);
                 Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, b), "gettable");
                 const Value key = reg_read(frame.base, frame_limit, v_stack_, c);
                 Value out = Value::nil();
@@ -441,9 +457,9 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::SetTable: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t c = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t c = read_u8(*cu, frame.code_end, frame.pc);
                 Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, a), "settable");
                 if (!table->set(reg_read(frame.base, frame_limit, v_stack_, b), reg_read(frame.base, frame_limit, v_stack_, c))) {
                     throw std::runtime_error("failed to set table key");
@@ -451,54 +467,54 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::Jmp: {
-                const std::int64_t rel = read_sleb(*cu, frame.code_end, frame.pc);
+                const std::int16_t rel = read_i16(*cu, frame.code_end, frame.pc);
                 const std::int64_t next = static_cast<std::int64_t>(frame.pc) + rel;
-                if (next < 0 || static_cast<std::size_t>(next) > frame.code_end) {
+                if (next < 0 || static_cast<std::uint64_t>(next) > frame.code_end) {
                     throw std::runtime_error("jump target out of bounds");
                 }
-                frame.pc = static_cast<std::size_t>(next);
+                frame.pc = static_cast<std::uint32_t>(next);
                 break;
             }
             case Op::JmpIfFalse: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::int64_t rel = read_sleb(*cu, frame.code_end, frame.pc);
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::int16_t rel = read_i16(*cu, frame.code_end, frame.pc);
                 const Value cond = reg_read(frame.base, frame_limit, v_stack_, a);
                 if (is_falsey(cond)) {
                     const std::int64_t next = static_cast<std::int64_t>(frame.pc) + rel;
-                    if (next < 0 || static_cast<std::size_t>(next) > frame.code_end) {
+                    if (next < 0 || static_cast<std::uint64_t>(next) > frame.code_end) {
                         throw std::runtime_error("jump target out of bounds");
                     }
-                    frame.pc = static_cast<std::size_t>(next);
+                    frame.pc = static_cast<std::uint32_t>(next);
                 }
                 break;
             }
             case Op::Call: {
-                const std::size_t f = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t arg_count = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t ret_count = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t avail = frame_limit - frame.base;
+                const std::uint8_t f = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t arg_count = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t ret_count = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t avail = frame_limit - frame.base;
                 if (f >= avail) {
                     throw std::runtime_error("call register index out of bounds");
                 }
-                if (f + 1U + arg_count > avail) {
+                if (static_cast<std::uint32_t>(f) + 1U + arg_count > avail) {
                     throw std::runtime_error("call argument range out of bounds");
                 }
-                if (f + ret_count > avail) {
+                if (static_cast<std::uint32_t>(f) + ret_count > avail) {
                     throw std::runtime_error("call return range out of bounds");
                 }
 
                 frame.call_dst = f;
                 frame.call_retc = ret_count;
                 v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f));
-                for (std::size_t i = 0; i < arg_count; ++i) {
-                    v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f + 1U + i));
+                for (std::uint8_t i = 0; i < arg_count; ++i) {
+                    v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, static_cast<std::uint8_t>(f + 1U + i)));
                 }
                 make_call_frame(arg_count, ret_count);
                 break;
             }
             case Op::Closure: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t chunk_index = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t chunk_index = read_u32(*cu, frame.code_end, frame.pc);
                 if (chunk_index >= cu->chunks_.size()) {
                     throw std::runtime_error("closure chunk index out of bounds");
                 }
@@ -507,15 +523,15 @@ void VM::run(std::size_t target_depth) {
                     throw std::runtime_error("upvalue capture register range out of bounds");
                 }
                 Closure* closure = make_closure(cu, chunk_index, chunk.upvalues);
-                for (std::size_t i = 0; i < chunk.upvalues; ++i) {
-                    closure->at(i) = reg_read(frame.base, frame_limit, v_stack_, a + 1U + i);
+                for (std::uint8_t i = 0; i < chunk.upvalues; ++i) {
+                    closure->at(i) = reg_read(frame.base, frame_limit, v_stack_, static_cast<std::uint8_t>(a + 1U + i));
                 }
                 reg_write(frame.base, frame_limit, v_stack_, a, Value::closure(closure));
                 break;
             }
             case Op::GetUpvalue: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t idx = read_u8(*cu, frame.code_end, frame.pc);
                 if (idx >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
@@ -523,8 +539,8 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::SetUpvalue: {
-                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t idx = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
                 if (idx >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
@@ -532,16 +548,16 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::Return: {
-                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t ret_count = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint8_t ret_count = read_u8(*cu, frame.code_end, frame.pc);
                 if (frame.base + a + ret_count > frame_limit) {
                     throw std::runtime_error("return register range out of bounds");
                 }
 
-                const std::size_t frame_base = frame.base;
-                const std::size_t expected = frame.ret_slots;
-                const std::size_t result_begin = frame_base + a;
-                const std::size_t result_end = result_begin + ret_count;
+                const std::uint32_t frame_base = frame.base;
+                const std::uint8_t expected = frame.ret_slots;
+                const std::uint32_t result_begin = frame_base + a;
+                const std::uint32_t result_end = result_begin + ret_count;
                 i_stack_.pop_back();
                 finish_frame_return(frame_base, expected, result_begin, result_end);
                 break;
@@ -552,7 +568,7 @@ void VM::run(std::size_t target_depth) {
     }
 }
 
-void VM::call(std::size_t arg_count, std::size_t ret_slots) {
+void VM::call(std::uint8_t arg_count, std::uint8_t ret_slots) {
     if (i_stack_.empty()) {
         throw std::runtime_error("call stack is not initialized");
     }
@@ -563,4 +579,3 @@ void VM::call(std::size_t arg_count, std::size_t ret_slots) {
 }
 
 } // namespace suru::vm
-

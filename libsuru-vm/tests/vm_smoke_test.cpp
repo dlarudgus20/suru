@@ -2,11 +2,12 @@
 #include "suru/vm/opcode.hpp"
 #include "suru/lib/lib.hpp"
 
+#include <limits>
 #include <gtest/gtest.h>
 
 namespace {
 
-void append_uleb(std::vector<std::uint8_t>& out, std::uint64_t value) {
+void append_u(std::vector<std::uint8_t>& out, std::uint64_t value) {
     while (true) {
         std::uint8_t byte = static_cast<std::uint8_t>(value & 0x7fU);
         value >>= 7U;
@@ -20,22 +21,29 @@ void append_uleb(std::vector<std::uint8_t>& out, std::uint64_t value) {
     }
 }
 
-void emit1(std::vector<std::uint8_t>& out, suru::vm::Op op, std::size_t a) {
-    out.push_back(static_cast<std::uint8_t>(op));
-    append_uleb(out, a);
+std::uint32_t to_u32(std::size_t v) {
+    if (v > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("value out of uint32 range");
+    }
+    return static_cast<std::uint32_t>(v);
 }
 
-void emit2(std::vector<std::uint8_t>& out, suru::vm::Op op, std::size_t a, std::size_t b) {
+void emit1(std::vector<std::uint8_t>& out, suru::vm::Op op, std::uint32_t a) {
     out.push_back(static_cast<std::uint8_t>(op));
-    append_uleb(out, a);
-    append_uleb(out, b);
+    append_u(out, a);
 }
 
-void emit3(std::vector<std::uint8_t>& out, suru::vm::Op op, std::size_t a, std::size_t b, std::size_t c) {
+void emit2(std::vector<std::uint8_t>& out, suru::vm::Op op, std::uint32_t a, std::uint32_t b) {
     out.push_back(static_cast<std::uint8_t>(op));
-    append_uleb(out, a);
-    append_uleb(out, b);
-    append_uleb(out, c);
+    append_u(out, a);
+    append_u(out, b);
+}
+
+void emit3(std::vector<std::uint8_t>& out, suru::vm::Op op, std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+    out.push_back(static_cast<std::uint8_t>(op));
+    append_u(out, a);
+    append_u(out, b);
+    append_u(out, c);
 }
 
 } // namespace
@@ -75,7 +83,7 @@ TEST(VmSmokeTest, ExecutesRegisterBytecodeAndWritesGlobal) {
     emit2(cu->opcodes_, suru::vm::Op::SetGlobal, 1, 0);
     emit2(cu->opcodes_, suru::vm::Op::Return, 0, 0);
 
-    cu->chunks_.push_back(suru::vm::Chunk {"main", 0, cu->opcodes_.size(), 0, 2, 0});
+    cu->chunks_.push_back(suru::vm::Chunk {"main", 0, to_u32(cu->opcodes_.size()), 0, 2, 0});
 
     suru::vm::Closure* closure = vm.make_closure(cu, 0, 0);
     ASSERT_NE(closure, nullptr);
@@ -96,16 +104,16 @@ TEST(VmSmokeTest, CallsChunkClosureAndReturnsValue) {
     ASSERT_NE(cu, nullptr);
     cu->constants_.push_back(suru::vm::Value::number(7.0));
 
-    const std::size_t main_begin = cu->opcodes_.size();
+    const std::uint32_t main_begin = to_u32(cu->opcodes_.size());
     emit2(cu->opcodes_, suru::vm::Op::Closure, 0, 1);
     emit3(cu->opcodes_, suru::vm::Op::Call, 0, 0, 1);
     emit2(cu->opcodes_, suru::vm::Op::Return, 0, 1);
-    const std::size_t main_end = cu->opcodes_.size();
+    const std::uint32_t main_end = to_u32(cu->opcodes_.size());
 
-    const std::size_t foo_begin = cu->opcodes_.size();
+    const std::uint32_t foo_begin = to_u32(cu->opcodes_.size());
     emit2(cu->opcodes_, suru::vm::Op::LoadK, 0, 0);
     emit2(cu->opcodes_, suru::vm::Op::Return, 0, 1);
-    const std::size_t foo_end = cu->opcodes_.size();
+    const std::uint32_t foo_end = to_u32(cu->opcodes_.size());
 
     cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 2, 0});
     cu->chunks_.push_back(suru::vm::Chunk {"foo", foo_begin, foo_end, 0, 1, 0});
@@ -129,21 +137,21 @@ TEST(VmSmokeTest, SupportsUpvalueCaptureAndMutation) {
     cu->constants_.push_back(suru::vm::Value::number(10.0));
     cu->constants_.push_back(suru::vm::Value::number(1.0));
 
-    const std::size_t main_begin = cu->opcodes_.size();
+    const std::uint32_t main_begin = to_u32(cu->opcodes_.size());
     emit2(cu->opcodes_, suru::vm::Op::LoadK, 1, 0);
     emit2(cu->opcodes_, suru::vm::Op::Closure, 0, 1);
     emit3(cu->opcodes_, suru::vm::Op::Call, 0, 0, 1);
     emit2(cu->opcodes_, suru::vm::Op::Return, 0, 1);
-    const std::size_t main_end = cu->opcodes_.size();
+    const std::uint32_t main_end = to_u32(cu->opcodes_.size());
 
-    const std::size_t inc_begin = cu->opcodes_.size();
+    const std::uint32_t inc_begin = to_u32(cu->opcodes_.size());
     emit2(cu->opcodes_, suru::vm::Op::GetUpvalue, 0, 0);
     emit2(cu->opcodes_, suru::vm::Op::LoadK, 1, 1);
     emit3(cu->opcodes_, suru::vm::Op::Add, 0, 0, 1);
     emit2(cu->opcodes_, suru::vm::Op::SetUpvalue, 0, 0);
     emit2(cu->opcodes_, suru::vm::Op::GetUpvalue, 0, 0);
     emit2(cu->opcodes_, suru::vm::Op::Return, 0, 1);
-    const std::size_t inc_end = cu->opcodes_.size();
+    const std::uint32_t inc_end = to_u32(cu->opcodes_.size());
 
     cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 3, 0});
     cu->chunks_.push_back(suru::vm::Chunk {"inc", inc_begin, inc_end, 0, 2, 1});
@@ -165,13 +173,13 @@ TEST(VmSmokeTest, EvaluatesBooleanAndOrOpcodes) {
     suru::vm::CodeUnit* cu = vm.make_code_unit();
     ASSERT_NE(cu, nullptr);
 
-    const std::size_t begin = cu->opcodes_.size();
+    const std::uint32_t begin = to_u32(cu->opcodes_.size());
     emit1(cu->opcodes_, suru::vm::Op::LoadTrue, 0);
     emit1(cu->opcodes_, suru::vm::Op::LoadFalse, 1);
     emit3(cu->opcodes_, suru::vm::Op::And, 2, 0, 1);
     emit3(cu->opcodes_, suru::vm::Op::Or, 3, 0, 1);
     emit2(cu->opcodes_, suru::vm::Op::Return, 2, 2);
-    const std::size_t end = cu->opcodes_.size();
+    const std::uint32_t end = to_u32(cu->opcodes_.size());
 
     cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 4, 0});
     suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);

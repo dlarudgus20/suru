@@ -42,9 +42,9 @@ struct InstDef {
 
 struct ChunkDef {
     std::string name;
-    std::size_t arity {0};
-    std::size_t slots {0};
-    std::size_t upvalues {0};
+    std::uint8_t arity {0};
+    std::uint8_t slots {0};
+    std::uint8_t upvalues {0};
     std::vector<InstDef> insts;
     std::unordered_set<std::string> label_names;
 };
@@ -101,7 +101,7 @@ std::string strip_comment(std::string_view line) {
     return std::string(line);
 }
 
-void append_uleb(std::vector<std::uint8_t>& out, std::uint64_t value) {
+void append_u(std::vector<std::uint8_t>& out, std::uint64_t value) {
     while (true) {
         std::uint8_t byte = static_cast<std::uint8_t>(value & 0x7fU);
         value >>= 7U;
@@ -115,16 +115,13 @@ void append_uleb(std::vector<std::uint8_t>& out, std::uint64_t value) {
     }
 }
 
-void append_sleb32_fixed(std::vector<std::uint8_t>& out, std::int32_t value) {
-    std::int64_t sv = static_cast<std::int64_t>(value);
-    for (int i = 0; i < 4; ++i) {
-        out.push_back(static_cast<std::uint8_t>((static_cast<std::uint64_t>(sv) & 0x7fU) | 0x80U));
-        sv >>= 7;
-    }
-    out.push_back(static_cast<std::uint8_t>(static_cast<std::uint64_t>(sv) & 0x7fU));
+void append_i16(std::vector<std::uint8_t>& out, std::int16_t value) {
+    const std::uint16_t raw = static_cast<std::uint16_t>(value);
+    out.push_back(static_cast<std::uint8_t>(raw & 0xffU));
+    out.push_back(static_cast<std::uint8_t>((raw >> 8U) & 0xffU));
 }
 
-std::size_t encoded_uleb_size(std::uint64_t value) {
+std::size_t encoded_u_size(std::uint64_t value) {
     std::size_t count = 0;
     do {
         value >>= 7U;
@@ -152,6 +149,20 @@ std::uint64_t parse_u64(std::string_view text, int line, std::string_view what) 
         throw AsmError(line, std::string("invalid ") + std::string(what));
     }
     return static_cast<std::uint64_t>(value);
+}
+
+std::uint8_t checked_u8(std::uint64_t value, int line, std::string_view what) {
+    if (value > 0xffU) {
+        throw AsmError(line, std::string(what) + " out of uint8 range");
+    }
+    return static_cast<std::uint8_t>(value);
+}
+
+std::uint32_t checked_u32(std::uint64_t value, int line, std::string_view what) {
+    if (value > 0xffff'ffffULL) {
+        throw AsmError(line, std::string(what) + " out of uint32 range");
+    }
+    return static_cast<std::uint32_t>(value);
 }
 
 suru::vm::Op parse_op(std::string_view op, int line) {
@@ -204,30 +215,30 @@ suru::vm::Op parse_op(std::string_view op, int line) {
     return it->second;
 }
 
-std::size_t resolve_index(
+std::uint32_t resolve_index(
     std::string_view token,
     int line,
     std::string_view what,
-    const std::unordered_map<std::string, std::size_t>& map
+    const std::unordered_map<std::string, std::uint32_t>& map
 ) {
     const auto it = map.find(std::string(token));
     if (it != map.end()) {
         return it->second;
     }
-    return static_cast<std::size_t>(parse_u64(token, line, what));
+    return checked_u32(parse_u64(token, line, what), line, what);
 }
 
 std::size_t inst_size(
     const InstDef& inst,
-    const std::unordered_map<std::string, std::size_t>& const_index,
-    const std::unordered_map<std::string, std::size_t>& chunk_index
+    const std::unordered_map<std::string, std::uint32_t>& const_index,
+    const std::unordered_map<std::string, std::uint32_t>& chunk_index
 ) {
     const suru::vm::Op op = parse_op(inst.op, inst.line);
-    auto uleb = [&](std::string_view tok, std::string_view what, const std::unordered_map<std::string, std::size_t>* map) -> std::size_t {
+    auto arg_size = [&](std::string_view tok, std::string_view what, const std::unordered_map<std::string, std::uint32_t>* map) -> std::size_t {
         if (map == nullptr) {
-            return encoded_uleb_size(parse_u64(tok, inst.line, what));
+            return encoded_u_size(parse_u64(tok, inst.line, what));
         }
-        return encoded_uleb_size(resolve_index(tok, inst.line, what, *map));
+        return encoded_u_size(resolve_index(tok, inst.line, what, *map));
     };
 
     switch (op) {
@@ -239,27 +250,27 @@ std::size_t inst_size(
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
-            return 1U + uleb(inst.args[0], "operand", nullptr)
-                + uleb(inst.args[1], "operand", nullptr);
+            return 1U + arg_size(inst.args[0], "operand", nullptr)
+                + arg_size(inst.args[1], "operand", nullptr);
         case suru::vm::Op::LoadK:
         case suru::vm::Op::GetGlobal:
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
-            return 1U + uleb(inst.args[0], "register", nullptr)
-                + uleb(inst.args[1], "index", &const_index);
+            return 1U + arg_size(inst.args[0], "register", nullptr)
+                + arg_size(inst.args[1], "index", &const_index);
         case suru::vm::Op::SetGlobal:
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
-            return 1U + uleb(inst.args[0], "index", &const_index)
-                + uleb(inst.args[1], "register", nullptr);
+            return 1U + arg_size(inst.args[0], "index", &const_index)
+                + arg_size(inst.args[1], "register", nullptr);
         case suru::vm::Op::Closure:
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "opcode requires two operands");
             }
-            return 1U + uleb(inst.args[0], "register", nullptr)
-                + uleb(inst.args[1], "chunk", &chunk_index);
+            return 1U + arg_size(inst.args[0], "register", nullptr)
+                + arg_size(inst.args[1], "chunk", &chunk_index);
         case suru::vm::Op::LoadNil:
         case suru::vm::Op::LoadTrue:
         case suru::vm::Op::LoadFalse:
@@ -267,7 +278,7 @@ std::size_t inst_size(
             if (inst.args.size() != 1) {
                 throw AsmError(inst.line, "opcode requires one operand");
             }
-            return 1U + uleb(inst.args[0], "operand", nullptr);
+            return 1U + arg_size(inst.args[0], "operand", nullptr);
         case suru::vm::Op::Add:
         case suru::vm::Op::Sub:
         case suru::vm::Op::Mul:
@@ -299,21 +310,21 @@ std::size_t inst_size(
                 throw AsmError(inst.line, "RETURN requires two operands");
             }
             if (op == suru::vm::Op::Return) {
-                return 1U + uleb(inst.args[0], "operand", nullptr) + uleb(inst.args[1], "operand", nullptr);
+                return 1U + arg_size(inst.args[0], "operand", nullptr) + arg_size(inst.args[1], "operand", nullptr);
             }
-            return 1U + uleb(inst.args[0], "operand", nullptr)
-                + uleb(inst.args[1], "operand", nullptr)
-                + uleb(inst.args[2], "operand", nullptr);
+            return 1U + arg_size(inst.args[0], "operand", nullptr)
+                + arg_size(inst.args[1], "operand", nullptr)
+                + arg_size(inst.args[2], "operand", nullptr);
         case suru::vm::Op::Jmp:
             if (inst.args.size() != 1) {
                 throw AsmError(inst.line, "JMP requires one label");
             }
-            return 1U + 5U;
+            return 1U + 2U;
         case suru::vm::Op::JmpIfFalse:
             if (inst.args.size() != 2) {
                 throw AsmError(inst.line, "JMPIF requires register and label");
             }
-            return 1U + uleb(inst.args[0], "register", nullptr) + 5U;
+            return 1U + arg_size(inst.args[0], "register", nullptr) + 2U;
         default:
             throw AsmError(inst.line, "unsupported opcode");
     }
@@ -324,20 +335,29 @@ void emit_inst(
     const InstDef& inst,
     std::size_t inst_offset,
     const std::unordered_map<std::string, std::size_t>& label_to_offset,
-    const std::unordered_map<std::string, std::size_t>& const_index,
-    const std::unordered_map<std::string, std::size_t>& chunk_index
+    const std::unordered_map<std::string, std::uint32_t>& const_index,
+    const std::unordered_map<std::string, std::uint32_t>& chunk_index
 ) {
     const suru::vm::Op op = parse_op(inst.op, inst.line);
     out.push_back(static_cast<std::uint8_t>(op));
 
-    auto emit_u = [&](std::string_view tok, std::string_view what, const std::unordered_map<std::string, std::size_t>* map) {
-        std::size_t value = 0;
+    auto emit_u = [&](std::string_view tok, std::string_view what, const std::unordered_map<std::string, std::uint32_t>* map) {
+        std::uint64_t value = 0;
         if (map == nullptr) {
-            value = static_cast<std::size_t>(parse_u64(tok, inst.line, what));
+            value = parse_u64(tok, inst.line, what);
         } else {
             value = resolve_index(tok, inst.line, what, *map);
         }
-        append_uleb(out, static_cast<std::uint64_t>(value));
+        append_u(out, value);
+    };
+    auto emit_u8 = [&](std::string_view tok, std::string_view what, const std::unordered_map<std::string, std::uint32_t>* map) {
+        std::uint64_t value = 0;
+        if (map == nullptr) {
+            value = parse_u64(tok, inst.line, what);
+        } else {
+            value = resolve_index(tok, inst.line, what, *map);
+        }
+        append_u(out, checked_u8(value, inst.line, what));
     };
 
     switch (op) {
@@ -346,27 +366,27 @@ void emit_inst(
         case suru::vm::Op::Not:
         case suru::vm::Op::GetUpvalue:
         case suru::vm::Op::SetUpvalue:
-            emit_u(inst.args[0], "register", nullptr);
-            emit_u(inst.args[1], "register", nullptr);
+            emit_u8(inst.args[0], "register", nullptr);
+            emit_u8(inst.args[1], "register", nullptr);
             break;
         case suru::vm::Op::LoadK:
         case suru::vm::Op::GetGlobal:
-            emit_u(inst.args[0], "register", nullptr);
+            emit_u8(inst.args[0], "register", nullptr);
             emit_u(inst.args[1], "index", &const_index);
             break;
         case suru::vm::Op::SetGlobal:
             emit_u(inst.args[0], "index", &const_index);
-            emit_u(inst.args[1], "register", nullptr);
+            emit_u8(inst.args[1], "register", nullptr);
             break;
         case suru::vm::Op::Closure:
-            emit_u(inst.args[0], "register", nullptr);
+            emit_u8(inst.args[0], "register", nullptr);
             emit_u(inst.args[1], "chunk", &chunk_index);
             break;
         case suru::vm::Op::LoadNil:
         case suru::vm::Op::LoadTrue:
         case suru::vm::Op::LoadFalse:
         case suru::vm::Op::NewTable:
-            emit_u(inst.args[0], "register", nullptr);
+            emit_u8(inst.args[0], "register", nullptr);
             break;
         case suru::vm::Op::Add:
         case suru::vm::Op::Sub:
@@ -391,34 +411,42 @@ void emit_inst(
         case suru::vm::Op::GetTable:
         case suru::vm::Op::SetTable:
         case suru::vm::Op::Call:
-            emit_u(inst.args[0], "register", nullptr);
-            emit_u(inst.args[1], "register", nullptr);
-            emit_u(inst.args[2], "register", nullptr);
+            emit_u8(inst.args[0], "register", nullptr);
+            emit_u8(inst.args[1], "register", nullptr);
+            emit_u8(inst.args[2], "register", nullptr);
             break;
         case suru::vm::Op::Return:
-            emit_u(inst.args[0], "register", nullptr);
-            emit_u(inst.args[1], "register", nullptr);
+            emit_u8(inst.args[0], "register", nullptr);
+            emit_u8(inst.args[1], "register", nullptr);
             break;
         case suru::vm::Op::Jmp: {
             const auto it = label_to_offset.find(inst.args[0]);
             if (it == label_to_offset.end()) {
                 throw AsmError(inst.line, "unknown label: " + inst.args[0]);
             }
-            const std::int64_t after = static_cast<std::int64_t>(inst_offset + 1U + 5U);
+            const std::int64_t after = static_cast<std::int64_t>(inst_offset + 1U + 2U);
             const std::int64_t target = static_cast<std::int64_t>(it->second);
-            append_sleb32_fixed(out, static_cast<std::int32_t>(target - after));
+            const std::int64_t rel = target - after;
+            if (rel < std::numeric_limits<std::int16_t>::min() || rel > std::numeric_limits<std::int16_t>::max()) {
+                throw AsmError(inst.line, "jump offset out of int16 range");
+            }
+            append_i16(out, static_cast<std::int16_t>(rel));
             break;
         }
         case suru::vm::Op::JmpIfFalse: {
-            emit_u(inst.args[0], "register", nullptr);
+            emit_u8(inst.args[0], "register", nullptr);
             const auto it = label_to_offset.find(inst.args[1]);
             if (it == label_to_offset.end()) {
                 throw AsmError(inst.line, "unknown label: " + inst.args[1]);
             }
-            const std::size_t operand_size = encoded_uleb_size(parse_u64(inst.args[0], inst.line, "register"));
-            const std::int64_t after = static_cast<std::int64_t>(inst_offset + 1U + operand_size + 5U);
+            const std::size_t operand_size = encoded_u_size(checked_u8(parse_u64(inst.args[0], inst.line, "register"), inst.line, "register"));
+            const std::int64_t after = static_cast<std::int64_t>(inst_offset + 1U + operand_size + 2U);
             const std::int64_t target = static_cast<std::int64_t>(it->second);
-            append_sleb32_fixed(out, static_cast<std::int32_t>(target - after));
+            const std::int64_t rel = target - after;
+            if (rel < std::numeric_limits<std::int16_t>::min() || rel > std::numeric_limits<std::int16_t>::max()) {
+                throw AsmError(inst.line, "jump offset out of int16 range");
+            }
+            append_i16(out, static_cast<std::int16_t>(rel));
             break;
         }
         default:
@@ -462,7 +490,7 @@ int run_file(const std::filesystem::path& path) {
 
     Section section = Section::None;
     std::vector<ConstDef> const_defs;
-    std::unordered_map<std::string, std::size_t> const_index;
+    std::unordered_map<std::string, std::uint32_t> const_index;
     std::vector<ChunkDef> chunk_defs;
     ChunkDef* current_chunk = nullptr;
 
@@ -499,9 +527,9 @@ int run_file(const std::filesystem::path& path) {
             }
             ChunkDef chunk;
             chunk.name = parts[1];
-            chunk.arity = static_cast<std::size_t>(parse_u64(parts[2], line_no, "arity"));
-            chunk.slots = static_cast<std::size_t>(parse_u64(parts[3], line_no, "slots"));
-            chunk.upvalues = static_cast<std::size_t>(parse_u64(parts[4], line_no, "upvalues"));
+            chunk.arity = checked_u8(parse_u64(parts[2], line_no, "arity"), line_no, "arity");
+            chunk.slots = checked_u8(parse_u64(parts[3], line_no, "slots"), line_no, "slots");
+            chunk.upvalues = checked_u8(parse_u64(parts[4], line_no, "upvalues"), line_no, "upvalues");
             if (chunk.arity > chunk.slots) {
                 throw AsmError(line_no, "chunk arity must be <= slots");
             }
@@ -559,7 +587,7 @@ int run_file(const std::filesystem::path& path) {
                 throw AsmError(line_no, "unknown constant type: " + parts[0]);
             }
 
-            const_index.emplace(name, const_defs.size());
+            const_index.emplace(name, checked_u32(const_defs.size(), line_no, "constant index"));
             const_defs.push_back(ConstDef {name, value});
             continue;
         }
@@ -600,10 +628,10 @@ int run_file(const std::filesystem::path& path) {
         throw AsmError(0, "at least one .chunk is required");
     }
 
-    std::unordered_map<std::string, std::size_t> chunk_index;
+    std::unordered_map<std::string, std::uint32_t> chunk_index;
     chunk_index.reserve(chunk_defs.size());
     for (std::size_t i = 0; i < chunk_defs.size(); ++i) {
-        chunk_index.emplace(chunk_defs[i].name, i);
+        chunk_index.emplace(chunk_defs[i].name, checked_u32(i, 0, "chunk index"));
     }
 
     if (!chunk_index.contains("main")) {
@@ -632,7 +660,7 @@ int run_file(const std::filesystem::path& path) {
             local_offset += inst_size(inst, const_index, chunk_index);
         }
 
-        const std::size_t code_begin = cu->opcodes_.size();
+        const std::uint32_t code_begin = checked_u32(cu->opcodes_.size(), 0, "code begin");
         local_offset = 0;
         for (const InstDef& inst : chunk.insts) {
             if (inst.op == "__LABEL__") {
@@ -641,7 +669,7 @@ int run_file(const std::filesystem::path& path) {
             emit_inst(cu->opcodes_, inst, local_offset, label_offsets, const_index, chunk_index);
             local_offset += inst_size(inst, const_index, chunk_index);
         }
-        const std::size_t code_end = cu->opcodes_.size();
+        const std::uint32_t code_end = checked_u32(cu->opcodes_.size(), 0, "code end");
         cu->chunks_.push_back(suru::vm::Chunk {
             chunk.name,
             code_begin,
@@ -652,8 +680,8 @@ int run_file(const std::filesystem::path& path) {
         });
     }
 
-    const std::size_t main_index = chunk_index.at("main");
-    const std::size_t main_upvalues = cu->chunks_[main_index].upvalues;
+    const std::uint32_t main_index = chunk_index.at("main");
+    const std::uint8_t main_upvalues = cu->chunks_[main_index].upvalues;
     suru::vm::Closure* entry = vm.make_closure(cu, main_index, main_upvalues);
     vm.push_value(suru::vm::Value::closure(entry));
     vm.call(0, 0);

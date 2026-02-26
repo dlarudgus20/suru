@@ -22,14 +22,14 @@ public:
     VM(VM&&) = delete;
     VM& operator=(VM&&) = delete;
 
-    void call(std::size_t arg_count, std::size_t ret_slots);
+    void call(std::uint8_t arg_count, std::uint8_t ret_slots);
 
     String* make_string(std::string_view text);
     Table* make_table();
-    Closure* make_closure_c(CFunction func, size_t n);
+    Closure* make_closure_c(CFunction func, std::uint8_t n);
 
     CodeUnit* make_code_unit();
-    Closure* make_closure(CodeUnit* cu, size_t chunk_index, size_t n);
+    Closure* make_closure(CodeUnit* cu, std::uint32_t chunk_index, std::uint8_t n);
 
     Table* globals();
 
@@ -37,18 +37,18 @@ public:
     void push_value(Value value);
 
     [[nodiscard]] std::size_t stack_top() const;
-    [[nodiscard]] Value getlocal(std::size_t index) const;
-    [[nodiscard]] Value getupvalue(std::size_t index) const;
+    [[nodiscard]] Value getlocal(std::uint8_t index) const;
+    [[nodiscard]] Value getupvalue(std::uint8_t index) const;
 
 private:
     struct CallFrame {
         Closure* closure {nullptr};
-        std::size_t pc {0};
-        std::size_t base {0};
-        std::size_t code_end {0};
-        std::size_t ret_slots {0};
-        std::size_t call_dst {0};
-        std::size_t call_retc {0};
+        std::uint32_t pc {0};
+        std::uint32_t base {0};
+        std::uint32_t code_end {0};
+        std::uint8_t ret_slots {0};
+        std::uint8_t call_dst {0};
+        std::uint8_t call_retc {0};
     };
 
     template <typename T>
@@ -63,12 +63,12 @@ private:
     std::vector<Value> v_stack_;
     std::vector<CallFrame> i_stack_;
 
-    void make_call_frame(std::size_t arg_count, std::size_t ret_slots);
+    void make_call_frame(std::uint8_t arg_count, std::uint8_t ret_slots);
     void finish_frame_return(
-        std::size_t frame_base,
-        std::size_t expected,
-        std::size_t result_begin,
-        std::size_t result_end
+        std::uint32_t frame_base,
+        std::uint8_t expected,
+        std::uint32_t result_begin,
+        std::uint32_t result_end
     );
     void run_c_frame();
     void run(std::size_t target_depth);

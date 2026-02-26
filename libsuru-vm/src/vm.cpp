@@ -61,7 +61,7 @@ Table* VM::make_table() {
     return object;
 }
 
-Closure* VM::make_closure_c(CFunction func, size_t n) {
+Closure* VM::make_closure_c(CFunction func, std::uint8_t n) {
     Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
     object->code = nullptr;
     object->cfunc = func;
@@ -77,7 +77,7 @@ CodeUnit* VM::make_code_unit() {
     return code_units_.back().get();
 }
 
-Closure* VM::make_closure(CodeUnit* cu, size_t chunk_index, size_t n) {
+Closure* VM::make_closure(CodeUnit* cu, std::uint32_t chunk_index, std::uint8_t n) {
     Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
     object->code = cu;
     object->chunk_index = chunk_index;
@@ -119,7 +119,7 @@ std::size_t VM::stack_top() const {
     return v_stack_.size() - base;
 }
 
-Value VM::getlocal(std::size_t index) const {
+Value VM::getlocal(std::uint8_t index) const {
     if (i_stack_.empty()) {
         throw std::runtime_error("call frame is not available");
     }
@@ -130,7 +130,7 @@ Value VM::getlocal(std::size_t index) const {
     return v_stack_[at];
 }
 
-Value VM::getupvalue(std::size_t index) const {
+Value VM::getupvalue(std::uint8_t index) const {
     if (i_stack_.empty()) {
         throw std::runtime_error("call frame is not available");
     }

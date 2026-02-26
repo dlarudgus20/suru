@@ -55,7 +55,7 @@ struct Closure : Object {
     CodeUnit* code {nullptr};
     union {
         CFunction cfunc {nullptr};
-        size_t chunk_index;
+        std::uint32_t chunk_index;
     };
 
     std::size_t len {0};
