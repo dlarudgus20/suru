@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 
@@ -16,6 +17,7 @@ enum class ObjectKind {
     String,
     Table,
     Closure,
+    Upvalue,
 };
 
 struct Object {
@@ -51,6 +53,15 @@ struct Table : Object {
     bool erase(Value key);
 };
 
+struct Upvalue : Object {
+    std::uint32_t slot {0};
+    bool is_open {false};
+    Value closed {};
+    Upvalue* next_open {nullptr};
+
+    constexpr Upvalue() : Object(ObjectKind::Upvalue) {}
+};
+
 struct Closure : Object {
     CodeUnit* code {nullptr};
     union {
@@ -62,19 +73,13 @@ struct Closure : Object {
 
     constexpr Closure() : Object(ObjectKind::Closure) {}
 
-    ~Closure() {
-        for (std::size_t i = 0; i < len; ++i) {
-            at(i).~Value();
-        }
-    }
-
-    Value& at(std::size_t idx) {
+    Upvalue*& at(std::size_t idx) {
         if (idx >= len) {
             throw std::out_of_range("idx");
         }
-        size_t header = (sizeof(*this) + alignof(Value) - 1) & ~(alignof(Value) - 1);
+        size_t header = (sizeof(*this) + alignof(Upvalue*) - 1) & ~(alignof(Upvalue*) - 1);
         char* ptr = reinterpret_cast<char*>(this) + header;
-        return reinterpret_cast<Value*>(ptr)[idx];
+        return reinterpret_cast<Upvalue**>(ptr)[idx];
     }
 };
 

@@ -229,6 +229,7 @@ void VM::run_c_frame() {
 
     const std::size_t result_end = v_stack_.size();
     i_stack_.pop_back();
+    close_upvalues(frame_base);
     finish_frame_return(
         frame_base,
         expected,
@@ -606,7 +607,8 @@ void VM::run(std::size_t target_depth) {
                 }
                 Closure* closure = make_closure(cu, chunk_index, chunk.upvalues);
                 for (std::uint8_t i = 0; i < chunk.upvalues; ++i) {
-                    closure->at(i) = reg_read(a + 1U + i);
+                    const std::uint32_t abs_slot = frame.base + a + 1U + i;
+                    closure->at(i) = capture_upvalue(abs_slot);
                 }
                 reg_write(a, Value::closure(closure));
                 break;
@@ -616,7 +618,18 @@ void VM::run(std::size_t target_depth) {
                 if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
                     throw InvalidCodeError("upvalue index out of bounds");
                 }
-                reg_write(a, current->at(static_cast<std::uint8_t>(idx)));
+                Upvalue* upvalue = current->at(static_cast<std::uint8_t>(idx));
+                if (upvalue == nullptr) {
+                    throw InternalError("upvalue is not initialized");
+                }
+                if (!upvalue->is_open) {
+                    reg_write(a, upvalue->closed);
+                    break;
+                }
+                if (upvalue->slot >= v_stack_.size()) {
+                    throw InternalError("open upvalue slot out of bounds");
+                }
+                reg_write(a, v_stack_[upvalue->slot]);
                 break;
             }
             case Op::SetUpvalue: {
@@ -624,7 +637,18 @@ void VM::run(std::size_t target_depth) {
                 if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
                     throw InvalidCodeError("upvalue index out of bounds");
                 }
-                current->at(static_cast<std::uint8_t>(idx)) = reg_read(a);
+                Upvalue* upvalue = current->at(static_cast<std::uint8_t>(idx));
+                if (upvalue == nullptr) {
+                    throw InternalError("upvalue is not initialized");
+                }
+                if (!upvalue->is_open) {
+                    upvalue->closed = reg_read(a);
+                    break;
+                }
+                if (upvalue->slot >= v_stack_.size()) {
+                    throw InternalError("open upvalue slot out of bounds");
+                }
+                v_stack_[upvalue->slot] = reg_read(a);
                 break;
             }
             case Op::Return: {
@@ -638,6 +662,7 @@ void VM::run(std::size_t target_depth) {
                 const std::uint32_t result_begin = frame_base + a;
                 const std::uint32_t result_end = result_begin + ret_count;
                 i_stack_.pop_back();
+                close_upvalues(frame_base);
                 finish_frame_return(frame_base, expected, result_begin, result_end);
                 break;
             }

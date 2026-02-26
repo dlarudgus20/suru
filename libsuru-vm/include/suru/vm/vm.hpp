@@ -54,6 +54,10 @@ private:
     template <typename T>
     T* allocate_object(size_t size, size_t align);
 
+    Upvalue* make_upvalue();
+    Upvalue* capture_upvalue(std::uint32_t abs_slot);
+    void close_upvalues(std::uint32_t from_base);
+
     Object* objects_ {nullptr};
     Table* global_table_ {nullptr};
     StringSet interned_strings_;
@@ -62,6 +66,7 @@ private:
 
     std::vector<Value> v_stack_;
     std::vector<CallFrame> i_stack_;
+    Upvalue* open_upvalues_ {nullptr};
 
     void make_call_frame(std::uint8_t arg_count, std::uint8_t ret_slots);
     void finish_frame_return(
@@ -77,4 +82,3 @@ private:
 };
 
 } // namespace suru::vm
-

@@ -2,7 +2,10 @@
 k_print = string "print"
 k_msg1 = string "first="
 k_msg2 = string "second="
+k_msg3 = string "third="
+k_msg4 = string "fourth="
 k_41 = number 41
+k_100 = number 100
 k_1 = number 1
 
 .chunk main 0 8 0
@@ -15,6 +18,17 @@ CALL 4 0 1
 CALL 2 2 0
 GETGLOBAL 2 k_print
 LOADK 3 k_msg2
+MOVE 4 0
+CALL 4 0 1
+CALL 2 2 0
+LOADK 1 k_100
+GETGLOBAL 2 k_print
+LOADK 3 k_msg3
+MOVE 4 0
+CALL 4 0 1
+CALL 2 2 0
+GETGLOBAL 2 k_print
+LOADK 3 k_msg4
 MOVE 4 0
 CALL 4 0 1
 CALL 2 2 0

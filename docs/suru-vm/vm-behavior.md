@@ -21,6 +21,12 @@ VM은 아래 상태를 유지한다.
   - 바이트코드 클로저: `code != nullptr`
   - C 함수 클로저: `code == nullptr`, `cfunc != nullptr`
 
+## Upvalue 모델
+- upvalue는 값 복사가 아니라 참조 셀(`Upvalue`)로 표현된다.
+- open 상태: `ptr`가 `v_stack_` 슬롯을 직접 가리킨다.
+- closed 상태: 프레임 종료 시 `closed = *ptr`로 값을 옮기고 `ptr = &closed`로 전환된다.
+- 같은 슬롯을 여러 클로저가 캡처하면 같은 `Upvalue` 셀을 공유한다.
+
 ## CallFrame
 CallFrame의 각 필드는 다음 의미를 가진다.
 - `closure`: 현재 실행 함수

@@ -144,6 +144,55 @@ TEST(VmSmokeTest, SupportsUpvalueCaptureAndMutation) {
     EXPECT_EQ(out.number_, 11.0);
 }
 
+TEST(VmSmokeTest, KeepsUpvalueAliveAfterOuterReturns) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(40.0));
+    cu->constants_.push_back(suru::vm::Value::number(1.0));
+
+    const std::uint32_t main_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::Closure, 0, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Call, 0, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Move, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Move, 0, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Call, 0, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Move, 0, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Call, 0, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t main_end = to_u32(cu->code_.size());
+
+    const std::uint32_t make_inc_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Closure, 0, 2));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t make_inc_end = to_u32(cu->code_.size());
+
+    const std::uint32_t inc_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::GetUpvalue, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Add, 0, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::SetUpvalue, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::GetUpvalue, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t inc_end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 2, 0});
+    cu->chunks_.push_back(suru::vm::Chunk {"make_inc", make_inc_begin, make_inc_end, 0, 2, 0});
+    cu->chunks_.push_back(suru::vm::Chunk {"inc", inc_begin, inc_end, 0, 2, 1});
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    EXPECT_EQ(out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(out.number_, 42.0);
+}
+
 TEST(VmSmokeTest, EvaluatesBooleanAndOrOpcodes) {
     suru::vm::VM vm;
 

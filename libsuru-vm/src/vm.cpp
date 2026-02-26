@@ -37,6 +37,7 @@ VM::~VM() {
             case ObjectKind::String: static_cast<String*>(cursor)->~String(); break;
             case ObjectKind::Table: static_cast<Table*>(cursor)->~Table(); break;
             case ObjectKind::Closure: static_cast<Closure*>(cursor)->~Closure(); break;
+            case ObjectKind::Upvalue: static_cast<Upvalue*>(cursor)->~Upvalue(); break;
             default: std::unreachable();
         }
         std::free(cursor);
@@ -64,12 +65,15 @@ Table* VM::make_table() {
 }
 
 Closure* VM::make_closure_c(CFunction func, std::uint8_t n) {
-    Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
+    Closure* object = allocate_object<Closure>(n * sizeof(Upvalue*), alignof(Upvalue*));
     object->code = nullptr;
     object->cfunc = func;
     object->len = n;
     for (std::size_t i = 0; i < n; ++i) {
-        new (&object->at(i)) Value {};
+        Upvalue* upvalue = make_upvalue();
+        upvalue->closed = Value::nil();
+        upvalue->is_open = false;
+        object->at(i) = upvalue;
     }
     return object;
 }
@@ -80,14 +84,71 @@ CodeUnit* VM::make_code_unit() {
 }
 
 Closure* VM::make_closure(CodeUnit* cu, std::uint32_t chunk_index, std::uint8_t n) {
-    Closure* object = allocate_object<Closure>(n * sizeof(Value), alignof(Value));
+    Closure* object = allocate_object<Closure>(n * sizeof(Upvalue*), alignof(Upvalue*));
     object->code = cu;
     object->chunk_index = chunk_index;
     object->len = n;
     for (std::size_t i = 0; i < n; ++i) {
-        new (&object->at(i)) Value {};
+        object->at(i) = nullptr;
     }
     return object;
+}
+
+Upvalue* VM::make_upvalue() {
+    Upvalue* upvalue = allocate_object<Upvalue>(0, 1);
+    upvalue->closed = Value::nil();
+    upvalue->slot = 0;
+    upvalue->is_open = false;
+    upvalue->next_open = nullptr;
+    return upvalue;
+}
+
+Upvalue* VM::capture_upvalue(std::uint32_t abs_slot) {
+    if (abs_slot >= v_stack_.size()) {
+        throw InvalidCodeError("upvalue capture slot out of bounds");
+    }
+
+    Upvalue* prev = nullptr;
+    Upvalue* curr = open_upvalues_;
+
+    while (curr != nullptr && curr->slot > abs_slot) {
+        prev = curr;
+        curr = curr->next_open;
+    }
+    if (curr != nullptr && curr->slot == abs_slot) {
+        return curr;
+    }
+
+    Upvalue* created = make_upvalue();
+    created->slot = abs_slot;
+    created->is_open = true;
+    created->next_open = curr;
+    if (prev == nullptr) {
+        open_upvalues_ = created;
+    } else {
+        prev->next_open = created;
+    }
+    return created;
+}
+
+void VM::close_upvalues(std::uint32_t from_base) {
+    if (from_base > v_stack_.size()) {
+        throw InternalError("close upvalues base out of bounds");
+    }
+    if (from_base == v_stack_.size()) {
+        return;
+    }
+
+    while (open_upvalues_ != nullptr && open_upvalues_->slot >= from_base) {
+        Upvalue* upvalue = open_upvalues_;
+        if (upvalue->slot >= v_stack_.size()) {
+            throw InternalError("open upvalue slot out of bounds");
+        }
+        upvalue->closed = v_stack_[upvalue->slot];
+        upvalue->is_open = false;
+        open_upvalues_ = upvalue->next_open;
+        upvalue->next_open = nullptr;
+    }
 }
 
 Table* VM::globals() {
@@ -150,8 +211,17 @@ Value VM::getupvalue(std::uint8_t index) const {
     if (index >= closure->len) {
         throw ApiError("upvalue index out of bounds");
     }
-    return closure->at(index);
+    Upvalue* upvalue = closure->at(index);
+    if (upvalue == nullptr) {
+        throw InternalError("upvalue is not initialized");
+    }
+    if (!upvalue->is_open) {
+        return upvalue->closed;
+    }
+    if (upvalue->slot >= v_stack_.size()) {
+        throw InternalError("open upvalue slot out of bounds");
+    }
+    return v_stack_[upvalue->slot];
 }
 
 } // namespace suru::vm
-
