@@ -17,7 +17,7 @@ return 1 + 2 * 3   -- 7
 
 ## 논리 연산(`and`, `or`) 단락 평가
 Normative Rule:
-- `a and b`: `a`가 falsey면 `a`, 아니면 `b`
+- `a and b`: `a`가 falsy면 `a`, 아니면 `b`
 - `a or b`: `a`가 truthy면 `a`, 아니면 `b`
 
 Inference Rule:
@@ -44,7 +44,7 @@ Normative Rule:
 | 연산자 | 의미 | 기대 피연산자 |
 | --- | --- | --- |
 | `-x` | 부호 반전 | `number` |
-| `not x` | 논리 부정 (`truthy`/`falsey` 기준) | 모든 값 |
+| `not x` | 논리 부정 (`truthy`/`falsy` 기준) | 모든 값 |
 | `#x` | 길이 연산 | `string` 또는 `table` |
 | `~x` | 비트 반전 | 정수로 해석 가능한 `number` |
 

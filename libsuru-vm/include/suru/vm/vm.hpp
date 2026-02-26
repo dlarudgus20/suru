@@ -24,14 +24,14 @@ public:
 
     void call(std::uint8_t arg_count, std::uint8_t ret_slots);
 
-    String* make_string(std::string_view text);
-    Table* make_table();
-    Closure* make_closure_c(CFunction func, std::uint8_t n);
+    [[nodiscard]] String* make_string(std::string_view text);
+    [[nodiscard]] Table* make_table();
+    [[nodiscard]] Closure* make_closure_c(CFunction func, std::uint8_t n);
 
-    CodeUnit* make_code_unit();
-    Closure* make_closure(CodeUnit* cu, std::uint32_t chunk_index, std::uint8_t n);
+    [[nodiscard]] CodeUnit* make_code_unit();
+    [[nodiscard]] Closure* make_closure(CodeUnit* cu, std::uint32_t chunk_index, std::uint8_t n);
 
-    Table* globals();
+    [[nodiscard]] Table* globals();
 
     [[nodiscard]] Value pop_value();
     void push_value(Value value);
@@ -72,6 +72,8 @@ private:
     );
     void run_c_frame();
     void run(std::size_t target_depth);
+    [[nodiscard]] Value reg_read(std::uint32_t index) const;
+    void reg_write(std::uint32_t index, Value value);
 };
 
 } // namespace suru::vm

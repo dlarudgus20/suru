@@ -41,7 +41,7 @@
 예시:
 ```sura
 LT 9 0 3
-IFFALSEY 9
+IFFALSY 9
 JMP loop_end
 ```
 
@@ -62,7 +62,7 @@ JMP loop_end
 | GETTABLE | ABC | `A B C` | `R[A] = R[B][R[C]]` |
 | SETTABLE | ABC | `A B C` | `R[A][R[B]] = R[C]` |
 | JMP | sAx | `rel` | 무조건 상대 점프 |
-| IFFALSEY / IFTRUTHY | ABx | `A` | 조건 거짓 시 다음 1워드 스킵 |
+| IFFALSY / IFTRUTHY | ABx | `A` | 조건 거짓 시 다음 1워드 스킵 |
 | IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `B C` | 비교 거짓 시 다음 1워드 스킵 |
 | CALL | ABC | `F argc retc` | 함수 호출 |
 | RETURN | ABx | `A retc` | `R[A..]` 반환 |

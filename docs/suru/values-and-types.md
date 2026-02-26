@@ -11,7 +11,7 @@ Suru 값은 다음 집합으로 제한한다.
 
 ## 진릿값 규칙
 Normative Rule:
-- `false`와 `nil`만 falsey이다.
+- `false`와 `nil`만 falsy이다.
 - 그 외 값은 모두 truthy이다.
 
 Inference Rule:

@@ -4,7 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace suru::vm {
@@ -34,43 +36,119 @@ struct Value {
 
     constexpr Value() : kind(ValueKind::Nil), table_(nullptr) {}
 
-    static constexpr Value nil() {
+    [[nodiscard]] static constexpr Value nil() {
         return Value {};
     }
 
-    static constexpr Value boolean(bool value) {
+    [[nodiscard]] static constexpr Value boolean(bool value) {
         Value out;
         out.kind = ValueKind::Boolean;
         out.bool_ = value;
         return out;
     }
 
-    static constexpr Value number(double value) {
+    [[nodiscard]] static constexpr Value number(double value) {
         Value out;
         out.kind = ValueKind::Number;
         out.number_ = value;
         return out;
     }
 
-    static constexpr Value string(String* value) {
+    [[nodiscard]] static constexpr Value string(String* value) {
         Value out;
         out.kind = ValueKind::String;
         out.string_ = value;
         return out;
     }
 
-    static constexpr Value table(Table* value) {
+    [[nodiscard]] static constexpr Value table(Table* value) {
         Value out;
         out.kind = ValueKind::Table;
         out.table_ = value;
         return out;
     }
 
-    static constexpr Value closure(Closure* value) {
+    [[nodiscard]] static constexpr Value closure(Closure* value) {
         Value out;
         out.kind = ValueKind::Closure;
         out.closure_ = value;
         return out;
+    }
+
+    [[nodiscard]] constexpr bool is_nil() const {
+        return kind == ValueKind::Nil;
+    }
+
+    [[nodiscard]] constexpr bool is_boolean() const {
+        return kind == ValueKind::Boolean;
+    }
+
+    [[nodiscard]] constexpr bool is_number() const {
+        return kind == ValueKind::Number;
+    }
+
+    [[nodiscard]] constexpr bool is_string() const {
+        return kind == ValueKind::String;
+    }
+
+    [[nodiscard]] constexpr bool is_table() const {
+        return kind == ValueKind::Table;
+    }
+
+    [[nodiscard]] constexpr bool is_closure() const {
+        return kind == ValueKind::Closure;
+    }
+
+    [[nodiscard]] constexpr bool is_falsy() const {
+        return is_nil() || (is_boolean() && !bool_);
+    }
+
+    [[nodiscard]] constexpr bool is_truthy() const {
+        return !is_falsy();
+    }
+
+    [[nodiscard]] bool as_boolean(std::string_view where) const {
+        if (!is_boolean()) {
+            type_error(where, "boolean");
+        }
+        return bool_;
+    }
+
+    [[nodiscard]] double as_number(std::string_view where) const {
+        if (!is_number()) {
+            type_error(where, "number");
+        }
+        return number_;
+    }
+
+    [[nodiscard]] std::int64_t as_integer(std::string_view where) const {
+        return static_cast<std::int64_t>(as_number(where));
+    }
+
+    [[nodiscard]] String* as_string(std::string_view where) const {
+        if (!is_string() || string_ == nullptr) {
+            type_error(where, "string");
+        }
+        return string_;
+    }
+
+    [[nodiscard]] Table* as_table(std::string_view where) const {
+        if (!is_table() || table_ == nullptr) {
+            type_error(where, "table");
+        }
+        return table_;
+    }
+
+    [[nodiscard]] Closure* as_closure(std::string_view where) const {
+        if (!is_closure() || closure_ == nullptr) {
+            type_error(where, "closure");
+        }
+        return closure_;
+    }
+
+private:
+    [[noreturn]] static void type_error(std::string_view where, std::string_view expected) {
+        throw std::runtime_error(std::string(where) + ": expected " + std::string(expected));
     }
 };
 

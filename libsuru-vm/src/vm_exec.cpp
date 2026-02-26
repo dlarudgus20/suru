@@ -23,43 +23,6 @@ constexpr std::uint32_t kCMask = 0x1FFU;
 constexpr std::uint32_t kBxMask = 0x3FFFFU;
 constexpr std::uint32_t kAxMask = 0x3FFFFFFU;
 
-bool is_falsey(Value value) {
-    return value.kind == ValueKind::Nil || (value.kind == ValueKind::Boolean && !value.bool_);
-}
-
-double require_number(Value value, std::string_view where) {
-    if (value.kind != ValueKind::Number) {
-        throw std::runtime_error(std::string(where) + ": expected number");
-    }
-    return value.number_;
-}
-
-bool require_boolean(Value value, std::string_view where) {
-    if (value.kind != ValueKind::Boolean) {
-        throw std::runtime_error(std::string(where) + ": expected boolean");
-    }
-    return value.bool_;
-}
-
-Table* require_table(Value value, std::string_view where) {
-    if (value.kind != ValueKind::Table || value.table_ == nullptr) {
-        throw std::runtime_error(std::string(where) + ": expected table");
-    }
-    return value.table_;
-}
-
-Closure* require_closure(Value value, std::string_view where) {
-    if (value.kind != ValueKind::Closure || value.closure_ == nullptr) {
-        throw std::runtime_error(std::string(where) + ": expected closure");
-    }
-    return value.closure_;
-}
-
-std::int64_t require_integer(Value value, std::string_view where) {
-    const double number = require_number(value, where);
-    return static_cast<std::int64_t>(number);
-}
-
 std::uint32_t to_u32(std::size_t value, std::string_view where) {
     if (value > std::numeric_limits<std::uint32_t>::max()) {
         throw std::runtime_error(std::string(where) + ": exceeds uint32 range");
@@ -78,52 +41,42 @@ Op decode_op(std::uint32_t word) {
     return static_cast<Op>((word >> kOpShift) & kOpMask);
 }
 
-std::uint32_t decode_a(std::uint32_t word) {
-    return (word >> kAShift) & kAMask;
+struct WordABC {
+    std::uint32_t a;
+    std::uint32_t b;
+    std::uint32_t c;
+};
+
+struct WordABx {
+    std::uint32_t a;
+    std::uint32_t bx;
+};
+
+struct WordSAx {
+    std::int32_t sax;
+};
+
+WordABC decode_abc(std::uint32_t word) {
+    return WordABC {
+        (word >> kAShift) & kAMask,
+        (word >> kBShift) & kBMask,
+        word & kCMask,
+    };
 }
 
-std::uint32_t decode_b(std::uint32_t word) {
-    return (word >> kBShift) & kBMask;
+WordABx decode_abx(std::uint32_t word) {
+    return WordABx {
+        (word >> kAShift) & kAMask,
+        word & kBxMask,
+    };
 }
 
-std::uint32_t decode_c(std::uint32_t word) {
-    return word & kCMask;
-}
-
-std::uint32_t decode_bx(std::uint32_t word) {
-    return word & kBxMask;
-}
-
-std::int32_t decode_sax(std::uint32_t word) {
+WordSAx decode_sax(std::uint32_t word) {
     const std::uint32_t raw = word & kAxMask;
     if ((raw & (1U << 25U)) == 0U) {
-        return static_cast<std::int32_t>(raw);
+        return WordSAx {static_cast<std::int32_t>(raw)};
     }
-    return static_cast<std::int32_t>(raw | (~kAxMask));
-}
-
-Value reg_read(std::uint32_t base, std::uint32_t limit, const std::vector<Value>& stack, std::uint32_t index) {
-    const std::uint32_t at32 = base + index;
-    if (at32 >= limit) {
-        throw std::runtime_error("register index out of bounds");
-    }
-    const std::size_t at = static_cast<std::size_t>(at32);
-    if (at >= stack.size()) {
-        throw std::runtime_error("register read out of stack bounds");
-    }
-    return stack[at];
-}
-
-void reg_write(std::uint32_t base, std::uint32_t limit, std::vector<Value>& stack, std::uint32_t index, Value value) {
-    const std::uint32_t at32 = base + index;
-    if (at32 >= limit) {
-        throw std::runtime_error("register index out of bounds");
-    }
-    const std::size_t at = static_cast<std::size_t>(at32);
-    if (at >= stack.size()) {
-        throw std::runtime_error("register write out of stack bounds");
-    }
-    stack[at] = value;
+    return WordSAx {static_cast<std::int32_t>(raw | (~kAxMask))};
 }
 
 void skip_next_word(std::uint32_t& pc, std::uint32_t code_end) {
@@ -134,6 +87,42 @@ void skip_next_word(std::uint32_t& pc, std::uint32_t code_end) {
 }
 
 } // namespace
+
+Value VM::reg_read(std::uint32_t index) const {
+    if (i_stack_.empty()) {
+        throw std::runtime_error("call stack is not initialized");
+    }
+    const CallFrame& frame = i_stack_.back();
+    const std::uint32_t base = frame.base;
+    const std::uint32_t limit = to_u32(v_stack_.size(), "frame limit");
+    const std::uint32_t at32 = base + index;
+    if (at32 >= limit) {
+        throw std::runtime_error("register index out of bounds");
+    }
+    const std::size_t at = static_cast<std::size_t>(at32);
+    if (at >= v_stack_.size()) {
+        throw std::runtime_error("register read out of stack bounds");
+    }
+    return v_stack_[at];
+}
+
+void VM::reg_write(std::uint32_t index, Value value) {
+    if (i_stack_.empty()) {
+        throw std::runtime_error("call stack is not initialized");
+    }
+    const CallFrame& frame = i_stack_.back();
+    const std::uint32_t base = frame.base;
+    const std::uint32_t limit = to_u32(v_stack_.size(), "frame limit");
+    const std::uint32_t at32 = base + index;
+    if (at32 >= limit) {
+        throw std::runtime_error("register index out of bounds");
+    }
+    const std::size_t at = static_cast<std::size_t>(at32);
+    if (at >= v_stack_.size()) {
+        throw std::runtime_error("register write out of stack bounds");
+    }
+    v_stack_[at] = value;
+}
 
 void VM::finish_frame_return(
     std::uint32_t frame_base,
@@ -161,10 +150,18 @@ void VM::finish_frame_return(
             throw std::runtime_error("call return range out of bounds");
         }
         for (std::uint8_t i = 0; i < emit; ++i) {
-            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint32_t>(caller.call_dst + i), v_stack_[result_begin + i]);
+            const std::uint32_t at32 = caller.base + caller.call_dst + i;
+            if (at32 >= caller_limit || static_cast<std::size_t>(at32) >= v_stack_.size()) {
+                throw std::runtime_error("call return range out of bounds");
+            }
+            v_stack_[at32] = v_stack_[result_begin + i];
         }
         for (std::uint8_t i = emit; i < expected; ++i) {
-            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint32_t>(caller.call_dst + i), Value::nil());
+            const std::uint32_t at32 = caller.base + caller.call_dst + i;
+            if (at32 >= caller_limit || static_cast<std::size_t>(at32) >= v_stack_.size()) {
+                throw std::runtime_error("call return range out of bounds");
+            }
+            v_stack_[at32] = Value::nil();
         }
         v_stack_.resize(frame_base);
         caller.call_dst = 0;
@@ -187,7 +184,7 @@ void VM::make_call_frame(std::uint8_t arg_count, std::uint8_t ret_slots) {
     }
 
     const std::size_t callee_index = v_stack_.size() - static_cast<std::size_t>(arg_count) - 1U;
-    Closure* callee = require_closure(v_stack_[callee_index], "call");
+    Closure* callee = v_stack_[callee_index].as_closure("call");
 
     if (callee->code == nullptr) {
         for (std::uint8_t i = 0; i < arg_count; ++i) {
@@ -290,35 +287,35 @@ void VM::run(std::size_t target_depth) {
 
         switch (op) {
             case Op::Move: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t b = decode_bx(word);
-                reg_write(frame.base, frame_limit, v_stack_, a, reg_read(frame.base, frame_limit, v_stack_, b));
+                const auto [a, b] = decode_abx(word);
+                reg_write(a, reg_read(b));
                 break;
             }
             case Op::LoadNil: {
-                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::nil());
+                const auto a = decode_abx(word).a;
+                reg_write(a, Value::nil());
                 break;
             }
             case Op::LoadTrue: {
-                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::boolean(true));
+                const auto a = decode_abx(word).a;
+                reg_write(a, Value::boolean(true));
                 break;
             }
             case Op::LoadFalse: {
-                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::boolean(false));
+                const auto a = decode_abx(word).a;
+                reg_write(a, Value::boolean(false));
                 break;
             }
             case Op::LoadK: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t k = decode_bx(word);
+                const auto [a, k] = decode_abx(word);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("constant index out of bounds");
                 }
-                reg_write(frame.base, frame_limit, v_stack_, a, cu->constants_[k]);
+                reg_write(a, cu->constants_[k]);
                 break;
             }
             case Op::GetGlobal: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t k = decode_bx(word);
+                const auto [a, k] = decode_abx(word);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
@@ -330,12 +327,11 @@ void VM::run(std::size_t target_depth) {
                 if (!globals()->get(key, &out)) {
                     out = Value::nil();
                 }
-                reg_write(frame.base, frame_limit, v_stack_, a, out);
+                reg_write(a, out);
                 break;
             }
             case Op::SetGlobal: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t k = decode_bx(word);
+                const auto [a, k] = decode_abx(word);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
@@ -343,189 +339,265 @@ void VM::run(std::size_t target_depth) {
                 if (key.kind != ValueKind::String) {
                     throw std::runtime_error("global key must be string");
                 }
-                if (!globals()->set(key, reg_read(frame.base, frame_limit, v_stack_, a))) {
+                if (!globals()->set(key, reg_read(a))) {
                     throw std::runtime_error("failed to set global value");
                 }
                 break;
             }
-            case Op::Add:
-            case Op::Sub:
-            case Op::Mul:
-            case Op::Div:
-            case Op::Idiv:
-            case Op::Mod:
-            case Op::Pow:
-            case Op::Band:
-            case Op::Bor:
-            case Op::Bxor:
-            case Op::Shl:
-            case Op::Shr:
-            case Op::Eq:
-            case Op::Ne:
-            case Op::Lt:
-            case Op::Le:
-            case Op::Gt:
-            case Op::Ge:
-            case Op::And:
-            case Op::Or: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t b = decode_b(word);
-                const std::uint32_t c = decode_c(word);
-                const Value lhs_v = reg_read(frame.base, frame_limit, v_stack_, b);
-                const Value rhs_v = reg_read(frame.base, frame_limit, v_stack_, c);
-
-                if (op == Op::Eq || op == Op::Ne) {
-                    const bool eq = value_equals(lhs_v, rhs_v);
-                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(op == Op::Eq ? eq : !eq));
-                    break;
-                }
-                if (op == Op::Lt || op == Op::Le || op == Op::Gt || op == Op::Ge) {
-                    const double lhs = require_number(lhs_v, "compare");
-                    const double rhs = require_number(rhs_v, "compare");
-                    bool result = false;
-                    switch (op) {
-                        case Op::Lt: result = lhs < rhs; break;
-                        case Op::Le: result = lhs <= rhs; break;
-                        case Op::Gt: result = lhs > rhs; break;
-                        case Op::Ge: result = lhs >= rhs; break;
-                        default: break;
-                    }
-                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(result));
-                    break;
-                }
-                if (op == Op::And || op == Op::Or) {
-                    const bool lhs = require_boolean(lhs_v, "logical op");
-                    const bool rhs = require_boolean(rhs_v, "logical op");
-                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(op == Op::And ? (lhs && rhs) : (lhs || rhs)));
-                    break;
-                }
-                if (op == Op::Band || op == Op::Bor || op == Op::Bxor || op == Op::Shl || op == Op::Shr) {
-                    const std::int64_t lhs = require_integer(lhs_v, "bit op");
-                    const std::int64_t rhs = require_integer(rhs_v, "bit op");
-                    std::int64_t result = 0;
-                    switch (op) {
-                        case Op::Band: result = lhs & rhs; break;
-                        case Op::Bor: result = lhs | rhs; break;
-                        case Op::Bxor: result = lhs ^ rhs; break;
-                        case Op::Shl: result = lhs << rhs; break;
-                        case Op::Shr: result = lhs >> rhs; break;
-                        default: break;
-                    }
-                    reg_write(frame.base, frame_limit, v_stack_, a, Value::number(static_cast<double>(result)));
-                    break;
-                }
-
-                const double lhs = require_number(lhs_v, "binary op");
-                const double rhs = require_number(rhs_v, "binary op");
-                double result = 0.0;
-                switch (op) {
-                    case Op::Add: result = lhs + rhs; break;
-                    case Op::Sub: result = lhs - rhs; break;
-                    case Op::Mul: result = lhs * rhs; break;
-                    case Op::Div: result = lhs / rhs; break;
-                    case Op::Idiv: result = std::floor(lhs / rhs); break;
-                    case Op::Mod: result = std::fmod(lhs, rhs); break;
-                    case Op::Pow: result = std::pow(lhs, rhs); break;
-                    default: break;
-                }
-                reg_write(frame.base, frame_limit, v_stack_, a, Value::number(result));
+            case Op::Add: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    reg_read(b).as_number("binary op") + reg_read(c).as_number("binary op")
+                ));
                 break;
             }
-            case Op::Neg:
+            case Op::Sub: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    reg_read(b).as_number("binary op") - reg_read(c).as_number("binary op")
+                ));
+                break;
+            }
+            case Op::Mul: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    reg_read(b).as_number("binary op") * reg_read(c).as_number("binary op")
+                ));
+                break;
+            }
+            case Op::Div: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    reg_read(b).as_number("binary op") / reg_read(c).as_number("binary op")
+                ));
+                break;
+            }
+            case Op::Idiv: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    std::floor(reg_read(b).as_number("binary op") / reg_read(c).as_number("binary op"))
+                ));
+                break;
+            }
+            case Op::Mod: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    std::fmod(reg_read(b).as_number("binary op"), reg_read(c).as_number("binary op"))
+                ));
+                break;
+            }
+            case Op::Pow: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    std::pow(reg_read(b).as_number("binary op"), reg_read(c).as_number("binary op"))
+                ));
+                break;
+            }
+            case Op::Eq: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    value_equals(reg_read(b), reg_read(c))
+                ));
+                break;
+            }
+            case Op::Ne: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    !value_equals(reg_read(b), reg_read(c))
+                ));
+                break;
+            }
+            case Op::Lt: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    reg_read(b).as_number("compare") < reg_read(c).as_number("compare")
+                ));
+                break;
+            }
+            case Op::Le: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    reg_read(b).as_number("compare") <= reg_read(c).as_number("compare")
+                ));
+                break;
+            }
+            case Op::Gt: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    reg_read(b).as_number("compare") > reg_read(c).as_number("compare")
+                ));
+                break;
+            }
+            case Op::Ge: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    reg_read(b).as_number("compare") >= reg_read(c).as_number("compare")
+                ));
+                break;
+            }
+            case Op::And: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    reg_read(b).as_boolean("logical op") && reg_read(c).as_boolean("logical op")
+                ));
+                break;
+            }
+            case Op::Or: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::boolean(
+                    reg_read(b).as_boolean("logical op") || reg_read(c).as_boolean("logical op")
+                ));
+                break;
+            }
+            case Op::Band: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    static_cast<double>(
+                        reg_read(b).as_integer("bit op") & reg_read(c).as_integer("bit op")
+                    )
+                ));
+                break;
+            }
+            case Op::Bor: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    static_cast<double>(
+                        reg_read(b).as_integer("bit op") | reg_read(c).as_integer("bit op")
+                    )
+                ));
+                break;
+            }
+            case Op::Bxor: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    static_cast<double>(
+                        reg_read(b).as_integer("bit op") ^ reg_read(c).as_integer("bit op")
+                    )
+                ));
+                break;
+            }
+            case Op::Shl: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    static_cast<double>(
+                        reg_read(b).as_integer("bit op") << reg_read(c).as_integer("bit op")
+                    )
+                ));
+                break;
+            }
+            case Op::Shr: {
+                const auto [a, b, c] = decode_abc(word);
+                reg_write(a, Value::number(
+                    static_cast<double>(
+                        reg_read(b).as_integer("bit op") >> reg_read(c).as_integer("bit op")
+                    )
+                ));
+                break;
+            }
+            case Op::Neg: {
+                const auto [a, b] = decode_abx(word);
+                reg_write(a, Value::number(-reg_read(b).as_number("neg")));
+                break;
+            }
             case Op::Not: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t b = decode_bx(word);
-                const Value input = reg_read(frame.base, frame_limit, v_stack_, b);
-                if (op == Op::Neg) {
-                    reg_write(frame.base, frame_limit, v_stack_, a, Value::number(-require_number(input, "neg")));
-                } else {
-                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(is_falsey(input)));
-                }
+                const auto [a, b] = decode_abx(word);
+                reg_write(a, Value::boolean(reg_read(b).is_falsy()));
                 break;
             }
             case Op::NewTable: {
-                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::table(make_table()));
+                const auto a = decode_abx(word).a;
+                reg_write(a, Value::table(make_table()));
                 break;
             }
             case Op::GetTable: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t b = decode_b(word);
-                const std::uint32_t c = decode_c(word);
-                Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, b), "gettable");
-                const Value key = reg_read(frame.base, frame_limit, v_stack_, c);
+                const auto [a, b, c] = decode_abc(word);
+                Table* table = reg_read(b).as_table("gettable");
                 Value out = Value::nil();
-                if (!table->get(key, &out)) {
+                if (!table->get(reg_read(c), &out)) {
                     out = Value::nil();
                 }
-                reg_write(frame.base, frame_limit, v_stack_, a, out);
+                reg_write(a, out);
                 break;
             }
             case Op::SetTable: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t b = decode_b(word);
-                const std::uint32_t c = decode_c(word);
-                Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, a), "settable");
-                if (!table->set(reg_read(frame.base, frame_limit, v_stack_, b), reg_read(frame.base, frame_limit, v_stack_, c))) {
+                const auto [a, b, c] = decode_abc(word);
+                Table* table = reg_read(a).as_table("settable");
+                if (!table->set(reg_read(b), reg_read(c))) {
                     throw std::runtime_error("failed to set table key");
                 }
                 break;
             }
             case Op::Jmp: {
-                const std::int64_t next = static_cast<std::int64_t>(frame.pc) + decode_sax(word);
+                const auto [sax] = decode_sax(word);
+                const std::int64_t next = static_cast<std::int64_t>(frame.pc) + sax;
                 if (next < 0 || static_cast<std::uint64_t>(next) > frame.code_end) {
                     throw std::runtime_error("jump target out of bounds");
                 }
                 frame.pc = static_cast<std::uint32_t>(next);
                 break;
             }
-            case Op::IfFalsey: {
-                const Value v = reg_read(frame.base, frame_limit, v_stack_, decode_a(word));
-                if (!is_falsey(v)) {
+            case Op::IfFalsy: {
+                const auto a = decode_abx(word).a;
+                if (!reg_read(a).is_falsy()) {
                     skip_next_word(frame.pc, frame.code_end);
                 }
                 break;
             }
             case Op::IfTruthy: {
-                const Value v = reg_read(frame.base, frame_limit, v_stack_, decode_a(word));
-                if (is_falsey(v)) {
+                const auto a = decode_abx(word).a;
+                if (reg_read(a).is_falsy()) {
                     skip_next_word(frame.pc, frame.code_end);
                 }
                 break;
             }
-            case Op::IfEq:
-            case Op::IfNe:
-            case Op::IfLt:
-            case Op::IfLe:
-            case Op::IfGt:
-            case Op::IfGe: {
-                const std::uint32_t b = decode_b(word);
-                const std::uint32_t c = decode_c(word);
-                const Value lhs_v = reg_read(frame.base, frame_limit, v_stack_, b);
-                const Value rhs_v = reg_read(frame.base, frame_limit, v_stack_, c);
-                bool cond = false;
-                if (op == Op::IfEq || op == Op::IfNe) {
-                    const bool eq = value_equals(lhs_v, rhs_v);
-                    cond = (op == Op::IfEq) ? eq : !eq;
-                } else {
-                    const double lhs = require_number(lhs_v, "skip compare");
-                    const double rhs = require_number(rhs_v, "skip compare");
-                    switch (op) {
-                        case Op::IfLt: cond = lhs < rhs; break;
-                        case Op::IfLe: cond = lhs <= rhs; break;
-                        case Op::IfGt: cond = lhs > rhs; break;
-                        case Op::IfGe: cond = lhs >= rhs; break;
-                        default: break;
-                    }
+            case Op::IfEq: {
+                const auto [_, b, c] = decode_abc(word);
+                if (!value_equals(reg_read(b), reg_read(c))) {
+                    skip_next_word(frame.pc, frame.code_end);
                 }
-                if (!cond) {
+                break;
+            }
+            case Op::IfNe: {
+                const auto [_, b, c] = decode_abc(word);
+                if (value_equals(reg_read(b), reg_read(c))) {
+                    skip_next_word(frame.pc, frame.code_end);
+                }
+                break;
+            }
+            case Op::IfLt: {
+                const auto [_, b, c] = decode_abc(word);
+                if (!(reg_read(b).as_number("if compare")
+                    < reg_read(c).as_number("if compare"))) {
+                    skip_next_word(frame.pc, frame.code_end);
+                }
+                break;
+            }
+            case Op::IfLe: {
+                const auto [_, b, c] = decode_abc(word);
+                if (!(reg_read(b).as_number("if compare")
+                    <= reg_read(c).as_number("if compare"))) {
+                    skip_next_word(frame.pc, frame.code_end);
+                }
+                break;
+            }
+            case Op::IfGt: {
+                const auto [_, b, c] = decode_abc(word);
+                if (!(reg_read(b).as_number("if compare")
+                    > reg_read(c).as_number("if compare"))) {
+                    skip_next_word(frame.pc, frame.code_end);
+                }
+                break;
+            }
+            case Op::IfGe: {
+                const auto [_, b, c] = decode_abc(word);
+                if (!(reg_read(b).as_number("if compare")
+                    >= reg_read(c).as_number("if compare"))) {
                     skip_next_word(frame.pc, frame.code_end);
                 }
                 break;
             }
             case Op::Call: {
-                const std::uint32_t f = decode_a(word);
-                const std::uint32_t arg_count = decode_b(word);
-                const std::uint32_t ret_count = decode_c(word);
+                const auto [f, arg_count, ret_count] = decode_abc(word);
                 if (arg_count > std::numeric_limits<std::uint8_t>::max()) {
                     throw std::runtime_error("call argument count exceeds uint8 range");
                 }
@@ -546,16 +618,15 @@ void VM::run(std::size_t target_depth) {
 
                 frame.call_dst = to_u8(f, "call destination register");
                 frame.call_retc = to_u8(ret_count, "call return count");
-                v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f));
+                v_stack_.push_back(reg_read(f));
                 for (std::uint32_t i = 0; i < arg_count; ++i) {
-                    v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f + 1U + i));
+                    v_stack_.push_back(reg_read(f + 1U + i));
                 }
                 make_call_frame(static_cast<std::uint8_t>(arg_count), static_cast<std::uint8_t>(ret_count));
                 break;
             }
             case Op::Closure: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t chunk_index = decode_bx(word);
+                const auto [a, chunk_index] = decode_abx(word);
                 if (chunk_index >= cu->chunks_.size()) {
                     throw std::runtime_error("closure chunk index out of bounds");
                 }
@@ -565,32 +636,29 @@ void VM::run(std::size_t target_depth) {
                 }
                 Closure* closure = make_closure(cu, chunk_index, chunk.upvalues);
                 for (std::uint8_t i = 0; i < chunk.upvalues; ++i) {
-                    closure->at(i) = reg_read(frame.base, frame_limit, v_stack_, a + 1U + i);
+                    closure->at(i) = reg_read(a + 1U + i);
                 }
-                reg_write(frame.base, frame_limit, v_stack_, a, Value::closure(closure));
+                reg_write(a, Value::closure(closure));
                 break;
             }
             case Op::GetUpvalue: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t idx = decode_bx(word);
+                const auto [a, idx] = decode_abx(word);
                 if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
-                reg_write(frame.base, frame_limit, v_stack_, a, current->at(static_cast<std::uint8_t>(idx)));
+                reg_write(a, current->at(static_cast<std::uint8_t>(idx)));
                 break;
             }
             case Op::SetUpvalue: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t idx = decode_bx(word);
+                const auto [a, idx] = decode_abx(word);
                 if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
-                current->at(static_cast<std::uint8_t>(idx)) = reg_read(frame.base, frame_limit, v_stack_, a);
+                current->at(static_cast<std::uint8_t>(idx)) = reg_read(a);
                 break;
             }
             case Op::Return: {
-                const std::uint32_t a = decode_a(word);
-                const std::uint32_t ret_count = decode_bx(word);
+                const auto [a, ret_count] = decode_abx(word);
                 if (ret_count > std::numeric_limits<std::uint8_t>::max()) {
                     throw std::runtime_error("return count exceeds uint8 range");
                 }

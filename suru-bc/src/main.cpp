@@ -214,7 +214,7 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"GETTABLE", suru::vm::Op::GetTable},
         {"SETTABLE", suru::vm::Op::SetTable},
         {"JMP", suru::vm::Op::Jmp},
-        {"IFFALSEY", suru::vm::Op::IfFalsey},
+        {"IFFALSY", suru::vm::Op::IfFalsy},
         {"IFTRUTHY", suru::vm::Op::IfTruthy},
         {"IFEQ", suru::vm::Op::IfEq},
         {"IFNE", suru::vm::Op::IfNe},
@@ -317,7 +317,7 @@ std::uint32_t emit_word(
         case suru::vm::Op::LoadTrue:
         case suru::vm::Op::LoadFalse:
         case suru::vm::Op::NewTable:
-        case suru::vm::Op::IfFalsey:
+        case suru::vm::Op::IfFalsy:
         case suru::vm::Op::IfTruthy: {
             if (inst.args.size() != 1) {
                 throw AsmError(inst.line, "opcode requires one operand");

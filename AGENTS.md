@@ -46,11 +46,16 @@
 - 이 항목은 Windows에서 작업할 때 적용한다. Windows가 아니라면 무시한다.
 - 작업 파일은 CRLF를 유지한다. 새로 만드는 파일도 전부 CRLF를 사용한다.
 - UTF-8 without BOM 인코딩을 사용하며 인코딩이 깨지지 않게 조심한다.
+- `Get-Content`뿐 아니라 모든 파일 읽기/수정/치환/저장 작업에서 인코딩을 명시한다(기본 인코딩 사용 금지).
 - PowerShell에서 파일을 읽을 때 기본 인코딩을 쓰지 말고 UTF-8을 명시한다.
   - 예: `Get-Content -Encoding UTF8 <path>`
   - 또는 .NET API 사용: `[System.IO.File]::ReadAllText(path, [System.Text.UTF8Encoding]::new($false))`
 - 파일을 쓸 때도 UTF-8 without BOM을 명시한다.
   - 예: `[System.IO.File]::WriteAllText(path, text, [System.Text.UTF8Encoding]::new($false))`
+- 하면 안 되는 예시(금지):
+  - `Get-Content <path>` (인코딩 미지정)
+  - `Get-Content -Raw <path>` + `Set-Content <path>` 조합으로 인코딩 지정 없이 전체 치환/덮어쓰기
+  - `-replace` 기반 일괄 치환 후 `Set-Content`로 저장하면서 `-Encoding` 또는 UTF-8 without BOM 지정 누락
 
 ## Markdown 표 규칙
 - 표 헤더를 | 항목 |처럼 공백 포함 형태로 쓰면, 구분자도 반드시 | --- | 형태로 공백을 맞춘다.

@@ -45,7 +45,7 @@ enum class Op : std::uint8_t {
     SetTable = 31,
 
     Jmp = 32,
-    IfFalsey = 33,
+    IfFalsy = 33,
     IfTruthy = 34,
     IfEq = 35,
     IfNe = 36,
