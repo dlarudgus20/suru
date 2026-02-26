@@ -14,8 +14,12 @@
 - `name`: 청크 이름 (`main` 진입점)
 - `code_begin`: `opcodes_` 내 시작 오프셋
 - `code_end`: `opcodes_` 내 끝 오프셋(배타)
-- `max_slots`: 프레임 로컬 슬롯 수
-- `upvalue_count`: 클로저 생성 시 업밸류 개수
+- `arity`: 파라미터 개수
+- `slots`: 프레임 로컬 슬롯 수
+- `upvalues`: 클로저 생성 시 업밸류 개수
+
+제약:
+- `arity <= slots`
 
 ## Operand 인코딩
 - opcode: 1 byte (`Op` enum 값)
@@ -26,16 +30,13 @@
 
 ### value stack
 - 산술/비교/테이블 연산의 피연산자와 결과를 push/pop한다.
-- 호출 시 callee와 인자가 같은 스택에 배치된다.
+- 호출 시 스택은 `[..., callee, arg0, arg1, ...]` 구조를 사용한다.
 
 ### frame base / local slot
 - 각 `CallFrame`은 `base`를 가진다.
 - 로컬 슬롯 인덱스 `i`는 실제 주소 `v_stack_[base + i]`를 뜻한다.
 - `GET_LOCAL/SET_LOCAL`은 이 슬롯을 읽고 쓴다.
-
-### max_slots
-- 함수 호출 시 callee 프레임은 `max_slots` 크기로 확장된다.
-- `arg_count > max_slots`면 호출 실패(`too many arguments for callee slots`).
+- 함수 진입 직후 `local[0..arity-1]`는 파라미터 슬롯이다.
 
 ### constants
 - `CONST k`: 상수 풀 인덱스 `k` 값을 stack에 push한다.
@@ -49,11 +50,13 @@
 
 동작:
 1. `callee`가 closure인지 검사
-2. C closure면 callee 슬롯 제거 후 args를 연속 영역으로 맞춘 뒤 C 함수 실행
-3. Suru closure면 args를 callee 시작 위치로 당기고 프레임 생성
-4. 함수가 생산한 결과를 caller가 기대한 `ret_count`로 맞춤
-- 부족하면 `nil` 패딩
-- 많으면 앞에서 `ret_count`개만 사용
+2. C closure면 기존 C 호출 경로로 실행
+3. Suru closure면 `arity` 기준으로 인자를 정규화
+- 부족하면 `nil`로 패딩
+- 초과하면 버림
+4. 정규화된 파라미터를 `local[0..arity-1]`에 배치
+5. 프레임을 `slots` 크기로 확장 후 실행
+6. 결과를 caller의 `ret_count`에 맞춰 패딩/절단
 
 ### RETURN `<count>`
 - 현재 프레임에서 `count`개를 pop해 반환값 벡터를 만든다.
@@ -61,17 +64,17 @@
 
 ## local / const / stack / slot 작동 예시
 
-예: `CALL 2 1` 직전
-- stack: `[..., callee, a, b]`
+예: callee의 `arity=3`, `slots=5`, 호출 인자 1개
+- 호출 직후 파라미터 슬롯:
+  - `local0 = arg0`
+  - `local1 = nil`
+  - `local2 = nil`
+- 나머지:
+  - `local3`, `local4`는 일반 로컬/임시 슬롯
 
-callee 진입 후(`max_slots = 4`):
-- slot0 = `a`
-- slot1 = `b`
-- slot2 = `nil`
-- slot3 = `nil`
-
-`GET_LOCAL 0`은 slot0(`a`)를 push한다.
-`SET_LOCAL 1`은 stack top을 pop해 slot1에 저장한다.
+예: callee의 `arity=2`, 호출 인자 4개
+- `local0 = arg0`, `local1 = arg1`
+- `arg2`, `arg3`는 무시
 
 ## Opcode 동작 레퍼런스
 
@@ -128,7 +131,7 @@ callee 진입 후(`max_slots = 4`):
 
 ## 어셈블리(suru-bc) 대응
 - `.const`: 상수 선언
-- `.chunk <name> <max_slot> <upvalue_count>`: 청크 선언
+- `.chunk <name> <arity> <slots> <upvalues>`: 청크 선언
 - `label:`: 점프 라벨
 - `main` 이름 청크가 진입점
 
@@ -137,6 +140,6 @@ callee 진입 후(`max_slots = 4`):
 - `local slot out of bounds`
 - `global key must be string`
 - `call stack underflow`
-- `too many arguments for callee slots`
+- `chunk arity exceeds slots`
 - `jump target out of bounds`
 - `unknown opcode`

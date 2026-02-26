@@ -37,8 +37,8 @@ public:
     [[nodiscard]] Value pop_value();
     void push_value(Value value);
 
-    [[nodiscard]] std::size_t c_arg_count() const;
-    [[nodiscard]] Value c_arg(std::size_t index) const;
+    [[nodiscard]] std::size_t stack_top() const;
+    [[nodiscard]] Value getlocal(std::size_t index) const;
 
 private:
     struct CallFrame {
@@ -46,7 +46,7 @@ private:
         std::size_t pc {0};
         std::size_t base {0};
         std::size_t code_end {0};
-        std::size_t expected_results {0};
+        std::size_t ret_slots {0};
     };
 
     template <typename T>
@@ -60,10 +60,6 @@ private:
 
     std::vector<Value> v_stack_;
     std::vector<CallFrame> i_stack_;
-
-    bool c_call_active_ {false};
-    std::size_t c_arg_base_ {0};
-    std::size_t c_arg_count_ {0};
 };
 
 } // namespace suru::vm

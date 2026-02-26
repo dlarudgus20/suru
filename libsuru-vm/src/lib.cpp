@@ -60,19 +60,19 @@ void std_print(suru::vm::VM* vm, suru::vm::Closure* self) {
         throw std::runtime_error("print: vm is null");
     }
 
-    for (std::size_t i = 0; i < vm->c_arg_count(); ++i) {
+    for (std::size_t i = 0; i < vm->stack_top(); ++i) {
         if (i != 0) {
             std::cout << '\t';
         }
-        std::cout << value_to_string(vm->c_arg(i));
+        std::cout << value_to_string(vm->getlocal(i));
     }
     std::cout << '\n';
 }
 
 void std_read_line(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() >= 1U) {
-        suru::vm::Value prompt = vm->c_arg(0);
+    if (vm->stack_top() >= 1U) {
+        suru::vm::Value prompt = vm->getlocal(0);
         if (prompt.kind != suru::vm::ValueKind::String || prompt.string_ == nullptr) {
             vm->push_value(std_nil());
             return;
@@ -91,12 +91,12 @@ void std_read_line(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void std_to_number(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
 
-    suru::vm::Value arg = vm->c_arg(0);
+    suru::vm::Value arg = vm->getlocal(0);
     if (arg.kind == suru::vm::ValueKind::Number) {
         vm->push_value(arg);
         return;
@@ -122,12 +122,12 @@ void std_to_number(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void std_to_string(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
 
-    const suru::vm::Value arg = vm->c_arg(0);
+    const suru::vm::Value arg = vm->getlocal(0);
     if (arg.kind == suru::vm::ValueKind::String) {
         vm->push_value(arg);
         return;
@@ -138,12 +138,12 @@ void std_to_string(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void std_type(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
 
-    const suru::vm::Value arg = vm->c_arg(0);
+    const suru::vm::Value arg = vm->getlocal(0);
     std::string_view name = "nil";
     switch (arg.kind) {
         case suru::vm::ValueKind::Nil: name = "nil"; break;
@@ -160,11 +160,11 @@ void std_type(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void str_trim(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
-    const suru::vm::Value arg = vm->c_arg(0);
+    const suru::vm::Value arg = vm->getlocal(0);
     if (arg.kind != suru::vm::ValueKind::String || arg.string_ == nullptr) {
         vm->push_value(std_nil());
         return;
@@ -185,13 +185,13 @@ void str_trim(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 2U) {
+    if (vm->stack_top() < 2U) {
         vm->push_value(std_nil());
         return;
     }
 
-    const suru::vm::Value s = vm->c_arg(0);
-    const suru::vm::Value sep = vm->c_arg(1);
+    const suru::vm::Value s = vm->getlocal(0);
+    const suru::vm::Value sep = vm->getlocal(1);
     if (s.kind != suru::vm::ValueKind::String || s.string_ == nullptr ||
         sep.kind != suru::vm::ValueKind::String || sep.string_ == nullptr) {
         vm->push_value(std_nil());
@@ -199,8 +199,8 @@ void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
     }
 
     bool keep_empty = false;
-    if (vm->c_arg_count() >= 3U) {
-        const suru::vm::Value opt = vm->c_arg(2);
+    if (vm->stack_top() >= 3U) {
+        const suru::vm::Value opt = vm->getlocal(2);
         if (opt.kind != suru::vm::ValueKind::Boolean) {
             vm->push_value(std_nil());
             return;
@@ -240,12 +240,12 @@ void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void table_keys(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
 
-    const suru::vm::Value arg = vm->c_arg(0);
+    const suru::vm::Value arg = vm->getlocal(0);
     if (arg.kind != suru::vm::ValueKind::Table || arg.table_ == nullptr) {
         vm->push_value(std_nil());
         return;
@@ -262,12 +262,12 @@ void table_keys(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void table_push(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 2U) {
+    if (vm->stack_top() < 2U) {
         vm->push_value(std_nil());
         return;
     }
 
-    const suru::vm::Value table_v = vm->c_arg(0);
+    const suru::vm::Value table_v = vm->getlocal(0);
     if (table_v.kind != suru::vm::ValueKind::Table || table_v.table_ == nullptr) {
         vm->push_value(std_nil());
         return;
@@ -275,7 +275,7 @@ void table_push(suru::vm::VM* vm, suru::vm::Closure* self) {
 
     const std::size_t max_index = table_max_array_index(table_v.table_);
     const double next_index = (max_index == static_cast<std::size_t>(-1)) ? 0.0 : static_cast<double>(max_index + 1U);
-    if (!table_v.table_->set(suru::vm::Value::number(next_index), vm->c_arg(1))) {
+    if (!table_v.table_->set(suru::vm::Value::number(next_index), vm->getlocal(1))) {
         vm->push_value(std_nil());
         return;
     }
@@ -285,12 +285,12 @@ void table_push(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void table_pop(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U) {
+    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
 
-    const suru::vm::Value table_v = vm->c_arg(0);
+    const suru::vm::Value table_v = vm->getlocal(0);
     if (table_v.kind != suru::vm::ValueKind::Table || table_v.table_ == nullptr) {
         vm->push_value(std_nil());
         return;
@@ -314,29 +314,29 @@ void table_pop(suru::vm::VM* vm, suru::vm::Closure* self) {
 
 void math_abs(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U || vm->c_arg(0).kind != suru::vm::ValueKind::Number) {
+    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
-    vm->push_value(suru::vm::Value::number(std::abs(vm->c_arg(0).number_)));
+    vm->push_value(suru::vm::Value::number(std::abs(vm->getlocal(0).number_)));
 }
 
 void math_floor(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U || vm->c_arg(0).kind != suru::vm::ValueKind::Number) {
+    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
-    vm->push_value(suru::vm::Value::number(std::floor(vm->c_arg(0).number_)));
+    vm->push_value(suru::vm::Value::number(std::floor(vm->getlocal(0).number_)));
 }
 
 void math_ceil(suru::vm::VM* vm, suru::vm::Closure* self) {
     (void)self;
-    if (vm->c_arg_count() < 1U || vm->c_arg(0).kind != suru::vm::ValueKind::Number) {
+    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
-    vm->push_value(suru::vm::Value::number(std::ceil(vm->c_arg(0).number_)));
+    vm->push_value(suru::vm::Value::number(std::ceil(vm->getlocal(0).number_)));
 }
 
 void register_cfunc(suru::vm::VM& vm, std::string_view name, suru::vm::CFunction fn) {

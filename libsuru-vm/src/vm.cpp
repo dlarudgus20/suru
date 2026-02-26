@@ -24,6 +24,7 @@ T* VM::allocate_object(size_t size, size_t align) {
 
 VM::VM() {
     global_table_ = load_table();
+    i_stack_.push_back(CallFrame {});
 }
 
 VM::~VM() {
@@ -111,23 +112,24 @@ void VM::push_value(Value value) {
     v_stack_.push_back(value);
 }
 
-std::size_t VM::c_arg_count() const {
-    if (!c_call_active_) {
-        return 0;
+std::size_t VM::stack_top() const {
+    if (i_stack_.empty()) {
+        return v_stack_.size();
     }
-    return c_arg_count_;
+    const std::size_t base = i_stack_.back().base;
+    if (v_stack_.size() < base) {
+        throw std::runtime_error("frame base is out of stack bounds");
+    }
+    return v_stack_.size() - base;
 }
 
-Value VM::c_arg(std::size_t index) const {
-    if (!c_call_active_) {
-        throw std::runtime_error("c args are not available");
+Value VM::getlocal(std::size_t index) const {
+    if (i_stack_.empty()) {
+        throw std::runtime_error("call frame is not available");
     }
-    if (index >= c_arg_count_) {
-        throw std::runtime_error("c arg index out of bounds");
-    }
-    const std::size_t at = c_arg_base_ + index;
+    const std::size_t at = i_stack_.back().base + index;
     if (at >= v_stack_.size()) {
-        throw std::runtime_error("c arg storage out of bounds");
+        throw std::runtime_error("local index out of bounds");
     }
     return v_stack_[at];
 }

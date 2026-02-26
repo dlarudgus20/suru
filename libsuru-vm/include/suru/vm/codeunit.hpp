@@ -13,8 +13,9 @@ struct Chunk {
     std::string name;
     std::size_t code_begin {0};
     std::size_t code_end {0};
-    std::size_t max_slots {0};
-    std::size_t upvalue_count {0};
+    std::size_t arity {0};
+    std::size_t slots {0};
+    std::size_t upvalues {0};
 };
 
 struct CodeUnit {

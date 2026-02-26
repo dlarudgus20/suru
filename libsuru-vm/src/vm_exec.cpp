@@ -102,8 +102,8 @@ void push_results(std::vector<Value>& stack, const std::vector<Value>& results, 
 } // namespace
 
 void VM::exec_call() {
-    if (!i_stack_.empty()) {
-        throw std::runtime_error("call stack is not empty");
+    if (i_stack_.empty() || i_stack_.back().closure != nullptr) {
+        throw std::runtime_error("call stack is not in idle state");
     }
     if (v_stack_.empty()) {
         throw std::runtime_error("value stack is empty");
@@ -111,38 +111,65 @@ void VM::exec_call() {
 
     Closure* entry = require_closure(pop_value(), "exec_call");
     if (entry->code == nullptr) {
-        if (entry->cfunc == nullptr) {
-            throw std::runtime_error("closure has no code/cfunc");
+        i_stack_.push_back(CallFrame {entry, 0, v_stack_.size(), 0, 0});
+    } else {
+        if (entry->chunk_index >= entry->code->chunks_.size()) {
+            throw std::runtime_error("invalid entry chunk index");
         }
-        entry->cfunc(this, entry);
-        return;
+        const Chunk& entry_chunk = entry->code->chunks_[entry->chunk_index];
+        if (entry_chunk.arity > entry_chunk.slots) {
+            throw std::runtime_error("chunk arity exceeds slots");
+        }
+        const std::size_t base = v_stack_.size();
+        v_stack_.resize(base + entry_chunk.slots, Value::nil());
+        i_stack_.push_back(CallFrame {entry, entry_chunk.code_begin, base, entry_chunk.code_end, 0});
     }
 
-    if (entry->chunk_index >= entry->code->chunks_.size()) {
-        throw std::runtime_error("invalid entry chunk index");
-    }
-
-    const Chunk& entry_chunk = entry->code->chunks_[entry->chunk_index];
-    const std::size_t base = v_stack_.size();
-    v_stack_.resize(base + entry_chunk.max_slots, Value::nil());
-    i_stack_.push_back(CallFrame {entry, entry_chunk.code_begin, base, entry_chunk.code_end, 0});
-
-    while (!i_stack_.empty()) {
+    while (true) {
         CallFrame& frame = i_stack_.back();
         Closure* current = frame.closure;
-        CodeUnit* cu = current->code;
-        if (cu == nullptr) {
-            throw std::runtime_error("invalid frame closure");
+        if (current == nullptr) {
+            return;
         }
+
+        if (current->code == nullptr) {
+            if (current->cfunc == nullptr) {
+                throw std::runtime_error("c closure has null function");
+            }
+
+            const std::size_t produced_base = v_stack_.size();
+            current->cfunc(this, current);
+            if (v_stack_.size() < produced_base) {
+                throw std::runtime_error("c function popped arguments/results");
+            }
+
+            std::vector<Value> produced;
+            produced.reserve(v_stack_.size() - produced_base);
+            for (std::size_t i = produced_base; i < v_stack_.size(); ++i) {
+                produced.push_back(v_stack_[i]);
+            }
+
+            const std::size_t expected = frame.ret_slots;
+            const std::size_t base_to_restore = frame.base;
+            i_stack_.pop_back();
+            v_stack_.resize(base_to_restore);
+            if (!i_stack_.empty() && i_stack_.back().closure == nullptr) {
+                for (Value value : produced) {
+                    v_stack_.push_back(value);
+                }
+            } else {
+                push_results(v_stack_, produced, expected);
+            }
+            continue;
+        }
+
+        CodeUnit* cu = current->code;
 
         if (frame.pc >= frame.code_end) {
             i_stack_.pop_back();
-            const std::size_t expected = frame.expected_results;
+            const std::size_t expected = frame.ret_slots;
             const std::size_t base_to_restore = frame.base;
             v_stack_.resize(base_to_restore);
-            if (i_stack_.empty()) {
-                return;
-            }
             push_results(v_stack_, {}, expected);
             continue;
         }
@@ -352,47 +379,12 @@ void VM::exec_call() {
                 Closure* callee = require_closure(v_stack_[callee_index], "call");
 
                 if (callee->code == nullptr) {
-                    // Drop callee slot, keep args contiguous for c_arg(i).
+                    // Drop callee slot and keep args contiguous as frame locals.
                     for (std::size_t i = 0; i < arg_count; ++i) {
                         v_stack_[callee_index + i] = v_stack_[callee_index + 1U + i];
                     }
                     v_stack_.resize(v_stack_.size() - 1U);
-
-                    const bool prev_active = c_call_active_;
-                    const std::size_t prev_base = c_arg_base_;
-                    const std::size_t prev_count = c_arg_count_;
-                    c_call_active_ = true;
-                    c_arg_base_ = callee_index;
-                    c_arg_count_ = arg_count;
-                    const std::size_t produced_base = v_stack_.size();
-
-                    if (callee->cfunc == nullptr) {
-                        throw std::runtime_error("c closure has null function");
-                    }
-                    try {
-                        callee->cfunc(this, callee);
-                    } catch (...) {
-                        c_call_active_ = prev_active;
-                        c_arg_base_ = prev_base;
-                        c_arg_count_ = prev_count;
-                        throw;
-                    }
-
-                    if (v_stack_.size() < produced_base) {
-                        throw std::runtime_error("c function popped arguments/results");
-                    }
-                    std::vector<Value> produced;
-                    produced.reserve(v_stack_.size() - produced_base);
-                    for (std::size_t i = produced_base; i < v_stack_.size(); ++i) {
-                        produced.push_back(v_stack_[i]);
-                    }
-
-                    c_call_active_ = prev_active;
-                    c_arg_base_ = prev_base;
-                    c_arg_count_ = prev_count;
-
-                    v_stack_.resize(callee_index);
-                    push_results(v_stack_, produced, ret_count);
+                    i_stack_.push_back(CallFrame {callee, 0, callee_index, 0, ret_count});
                     break;
                 }
 
@@ -400,15 +392,25 @@ void VM::exec_call() {
                     throw std::runtime_error("callee chunk index out of bounds");
                 }
                 const Chunk& callee_chunk = callee->code->chunks_[callee->chunk_index];
-                if (arg_count > callee_chunk.max_slots) {
-                    throw std::runtime_error("too many arguments for callee slots");
+                if (callee_chunk.arity > callee_chunk.slots) {
+                    throw std::runtime_error("chunk arity exceeds slots");
                 }
 
-                for (std::size_t i = 0; i < arg_count; ++i) {
-                    v_stack_[callee_index + i] = v_stack_[callee_index + 1 + i];
+                std::vector<Value> params;
+                params.reserve(callee_chunk.arity);
+                const std::size_t copied = (arg_count < callee_chunk.arity) ? arg_count : callee_chunk.arity;
+                for (std::size_t i = 0; i < copied; ++i) {
+                    params.push_back(v_stack_[callee_index + 1U + i]);
                 }
-                v_stack_.resize(v_stack_.size() - 1U);
-                v_stack_.resize(callee_index + callee_chunk.max_slots, Value::nil());
+                for (std::size_t i = copied; i < callee_chunk.arity; ++i) {
+                    params.push_back(Value::nil());
+                }
+
+                v_stack_.resize(callee_index);
+                for (Value value : params) {
+                    v_stack_.push_back(value);
+                }
+                v_stack_.resize(callee_index + callee_chunk.slots, Value::nil());
                 i_stack_.push_back(CallFrame {
                     callee,
                     callee_chunk.code_begin,
@@ -424,7 +426,7 @@ void VM::exec_call() {
                     throw std::runtime_error("closure chunk index out of bounds");
                 }
                 const Chunk& chunk = cu->chunks_[chunk_index];
-                Closure* closure = load_closure(cu, chunk_index, chunk.upvalue_count);
+                Closure* closure = load_closure(cu, chunk_index, chunk.upvalues);
                 v_stack_.push_back(Value::closure(closure));
                 break;
             }
@@ -440,18 +442,17 @@ void VM::exec_call() {
                 }
 
                 const std::size_t frame_base = frame.base;
-                const std::size_t expected = frame.expected_results;
+                const std::size_t expected = frame.ret_slots;
                 i_stack_.pop_back();
                 v_stack_.resize(frame_base);
 
-                if (i_stack_.empty()) {
+                if (!i_stack_.empty() && i_stack_.back().closure == nullptr) {
                     for (Value value : results) {
                         v_stack_.push_back(value);
                     }
-                    return;
+                } else {
+                    push_results(v_stack_, results, expected);
                 }
-
-                push_results(v_stack_, results, expected);
                 break;
             }
             default:

@@ -42,8 +42,9 @@ struct InstDef {
 
 struct ChunkDef {
     std::string name;
-    std::size_t max_slots {0};
-    std::size_t upvalue_count {0};
+    std::size_t arity {0};
+    std::size_t slots {0};
+    std::size_t upvalues {0};
     std::vector<InstDef> insts;
     std::unordered_set<std::string> label_names;
 };
@@ -333,13 +334,13 @@ void print_help(std::ostream& out) {
         << "  .const\n"
         << "    k0 = number 1\n"
         << "    k1 = string \"print\"\n"
-        << "  .chunk main 16 0\n"
+        << "  .chunk main 0 16 0\n"
         << "    GET_GLOBAL k1\n"
         << "    CLOSURE foo\n"
         << "    CALL 0 1\n"
         << "    CALL 1 0\n"
         << "    RETURN 0\n"
-        << "  .chunk foo 8 0\n"
+        << "  .chunk foo 0 8 0\n"
         << "    CONST k0\n"
         << "    RETURN 1\n";
 }
@@ -374,8 +375,8 @@ int run_file(const std::filesystem::path& path) {
 
         if (no_comment.starts_with(".chunk")) {
             const auto parts = split_ws(no_comment);
-            if (parts.size() != 4) {
-                throw AsmError(line_no, "expected: .chunk <name> <max_slot> <upvalue_count>");
+            if (parts.size() != 5) {
+                throw AsmError(line_no, "expected: .chunk <name> <arity> <slots> <upvalues>");
             }
             if (parts[1].empty()) {
                 throw AsmError(line_no, "chunk name cannot be empty");
@@ -387,8 +388,12 @@ int run_file(const std::filesystem::path& path) {
             }
             ChunkDef chunk;
             chunk.name = parts[1];
-            chunk.max_slots = static_cast<std::size_t>(parse_u64(parts[2], line_no, "max_slot"));
-            chunk.upvalue_count = static_cast<std::size_t>(parse_u64(parts[3], line_no, "upvalue_count"));
+            chunk.arity = static_cast<std::size_t>(parse_u64(parts[2], line_no, "arity"));
+            chunk.slots = static_cast<std::size_t>(parse_u64(parts[3], line_no, "slots"));
+            chunk.upvalues = static_cast<std::size_t>(parse_u64(parts[4], line_no, "upvalues"));
+            if (chunk.arity > chunk.slots) {
+                throw AsmError(line_no, "chunk arity must be <= slots");
+            }
             chunk_defs.push_back(std::move(chunk));
             current_chunk = &chunk_defs.back();
             section = Section::Chunk;
@@ -531,13 +536,14 @@ int run_file(const std::filesystem::path& path) {
             chunk.name,
             code_begin,
             code_end,
-            chunk.max_slots,
-            chunk.upvalue_count,
+            chunk.arity,
+            chunk.slots,
+            chunk.upvalues,
         });
     }
 
     const std::size_t main_index = chunk_index.at("main");
-    const std::size_t main_upvalues = cu->chunks_[main_index].upvalue_count;
+    const std::size_t main_upvalues = cu->chunks_[main_index].upvalues;
     suru::vm::Closure* entry = vm.load_closure(cu, main_index, main_upvalues);
     vm.push_value(suru::vm::Value::closure(entry));
     vm.exec_call();

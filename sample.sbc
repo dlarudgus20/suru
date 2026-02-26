@@ -26,7 +26,7 @@ k_n40 = number 40
 k_n2 = number 2
 k_n7n = number -7
 
-.chunk main 8 0
+.chunk main 0 8 0
 ; print("== suru-bc sample ==")
 GET_GLOBAL k_print
 CONST k_banner
@@ -131,7 +131,7 @@ CALL 2 0
 
 RETURN 0
 
-.chunk add2 2 0
+.chunk add2 2 2 0
 GET_LOCAL 0
 GET_LOCAL 1
 ADD
