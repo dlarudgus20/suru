@@ -193,6 +193,8 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"CALL", suru::vm::Op::Call},
         {"RETURN", suru::vm::Op::Return},
         {"CLOSURE", suru::vm::Op::Closure},
+        {"GET_UPVALUE", suru::vm::Op::GetUpvalue},
+        {"SET_UPVALUE", suru::vm::Op::SetUpvalue},
     };
 
     const auto it = kOps.find(std::string(op));
@@ -214,6 +216,8 @@ std::size_t inst_size(
         case suru::vm::Op::SetLocal:
         case suru::vm::Op::GetGlobal:
         case suru::vm::Op::SetGlobal:
+        case suru::vm::Op::GetUpvalue:
+        case suru::vm::Op::SetUpvalue:
         case suru::vm::Op::Return: {
             if (inst.args.size() != 1) {
                 throw AsmError(inst.line, "opcode requires one operand");
@@ -281,6 +285,8 @@ void emit_inst(
         case suru::vm::Op::SetLocal:
         case suru::vm::Op::GetGlobal:
         case suru::vm::Op::SetGlobal:
+        case suru::vm::Op::GetUpvalue:
+        case suru::vm::Op::SetUpvalue:
         case suru::vm::Op::Return: {
             append_uleb(out, static_cast<std::uint64_t>(parse_operand_index(inst.args[0])));
             break;
@@ -337,6 +343,8 @@ void print_help(std::ostream& out) {
         << "  .chunk main 0 16 0\n"
         << "    GET_GLOBAL k1\n"
         << "    CLOSURE foo\n"
+        << "    GET_UPVALUE 0\n"
+        << "    SET_UPVALUE 0\n"
         << "    CALL 0 1\n"
         << "    CALL 1 0\n"
         << "    RETURN 0\n"

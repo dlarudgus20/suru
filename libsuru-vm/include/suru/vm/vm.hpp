@@ -38,6 +38,7 @@ public:
 
     [[nodiscard]] std::size_t stack_top() const;
     [[nodiscard]] Value getlocal(std::size_t index) const;
+    [[nodiscard]] Value getupvalue(std::size_t index) const;
 
 private:
     struct CallFrame {

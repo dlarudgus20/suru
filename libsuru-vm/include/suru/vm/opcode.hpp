@@ -50,6 +50,8 @@ enum class Op : std::uint8_t {
     Call = 0x60,
     Return = 0x61,
     Closure = 0x62,
+    GetUpvalue = 0x63,
+    SetUpvalue = 0x64,
 };
 
 } // namespace suru::vm

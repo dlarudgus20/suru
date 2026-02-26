@@ -158,7 +158,7 @@ TEST(VmSmokeTest, UsesConfiguredKeyEqualityRules) {
 TEST(VmSmokeTest, CreatesClosureWithInitializedSlots) {
     suru::vm::VM vm;
 
-    suru::vm::CFunction func = [](auto vm, auto self) {};
+    suru::vm::CFunction func = [](auto vm) {};
 
     suru::vm::Closure* closure = vm.make_closure_c(func, 3);
     ASSERT_NE(closure, nullptr);
@@ -172,6 +172,48 @@ TEST(VmSmokeTest, CreatesClosureWithInitializedSlots) {
     closure->at(1) = suru::vm::Value::number(9.0);
     EXPECT_EQ(closure->at(1).kind, suru::vm::ValueKind::Number);
     EXPECT_EQ(closure->at(1).number_, 9.0);
+}
+
+TEST(VmSmokeTest, CFunctionCanReadUpvalueThroughVmApi) {
+    suru::vm::VM vm;
+
+    suru::vm::CFunction func = [](suru::vm::VM* vm_ptr) {
+        vm_ptr->push_value(vm_ptr->getupvalue(0));
+    };
+
+    suru::vm::Closure* closure = vm.make_closure_c(func, 1);
+    ASSERT_NE(closure, nullptr);
+    closure->at(0) = suru::vm::Value::number(123.0);
+
+    vm.push_value(suru::vm::Value::closure(closure));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    EXPECT_EQ(out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(out.number_, 123.0);
+}
+
+TEST(VmSmokeTest, GetUpvalueOutOfBoundsFailsInCFunction) {
+    suru::vm::VM vm;
+
+    suru::vm::CFunction func = [](suru::vm::VM* vm_ptr) {
+        (void)vm_ptr->getupvalue(1);
+    };
+
+    suru::vm::Closure* closure = vm.make_closure_c(func, 1);
+    ASSERT_NE(closure, nullptr);
+    closure->at(0) = suru::vm::Value::number(7.0);
+
+    vm.push_value(suru::vm::Value::closure(closure));
+    try {
+        vm.call(0, 0);
+        FAIL() << "Expected runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_STREQ(e.what(), "upvalue index out of bounds");
+    } catch (...) {
+        FAIL() << "Expected std::runtime_error";
+    }
 }
 
 TEST(VmSmokeTest, ExecutesBytecodeAndWritesGlobal) {
@@ -333,5 +375,152 @@ TEST(VmSmokeTest, TruncatesExtraArgsByArity) {
     suru::vm::Value out = vm.pop_value();
     EXPECT_EQ(out.kind, suru::vm::ValueKind::Number);
     EXPECT_EQ(out.number_, 20.0);
+}
+
+TEST(VmSmokeTest, ClosureCapturesUpvaluesByValue) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(10.0));
+    cu->constants_.push_back(suru::vm::Value::number(20.0));
+
+    const std::size_t main_begin = cu->opcodes_.size();
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Const));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::SetLocal));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetLocal));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Closure));
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::SetLocal));
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Const));
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::SetLocal));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetLocal));
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Call));
+    append_uleb(cu->opcodes_, 0);
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Return));
+    append_uleb(cu->opcodes_, 1);
+    const std::size_t main_end = cu->opcodes_.size();
+
+    const std::size_t foo_begin = cu->opcodes_.size();
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetUpvalue));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Return));
+    append_uleb(cu->opcodes_, 1);
+    const std::size_t foo_end = cu->opcodes_.size();
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 2, 0});
+    cu->chunks_.push_back(suru::vm::Chunk {"foo", foo_begin, foo_end, 0, 0, 1});
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    EXPECT_EQ(out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(out.number_, 10.0);
+}
+
+TEST(VmSmokeTest, SetAndGetUpvalueWorks) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(1.0));
+
+    const std::size_t main_begin = cu->opcodes_.size();
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Const));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Closure));
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::SetLocal));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetLocal));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Call));
+    append_uleb(cu->opcodes_, 0);
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Pop));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetLocal));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Call));
+    append_uleb(cu->opcodes_, 0);
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Return));
+    append_uleb(cu->opcodes_, 1);
+    const std::size_t main_end = cu->opcodes_.size();
+
+    const std::size_t counter_begin = cu->opcodes_.size();
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetUpvalue));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Const));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Add));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::SetUpvalue));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetUpvalue));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Return));
+    append_uleb(cu->opcodes_, 1);
+    const std::size_t counter_end = cu->opcodes_.size();
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 1, 0});
+    cu->chunks_.push_back(suru::vm::Chunk {"counter", counter_begin, counter_end, 0, 0, 1});
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 1));
+
+    ASSERT_GE(vm.stack_top(), 1U);
+    const suru::vm::Value out = vm.pop_value();
+    EXPECT_EQ(out.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(out.number_, 3.0);
+}
+
+TEST(VmSmokeTest, ClosureCaptureUnderflowFails) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+
+    const std::size_t main_begin = cu->opcodes_.size();
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Closure));
+    append_uleb(cu->opcodes_, 1);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Return));
+    append_uleb(cu->opcodes_, 0);
+    const std::size_t main_end = cu->opcodes_.size();
+
+    const std::size_t foo_begin = cu->opcodes_.size();
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::GetUpvalue));
+    append_uleb(cu->opcodes_, 0);
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Return));
+    append_uleb(cu->opcodes_, 1);
+    const std::size_t foo_end = cu->opcodes_.size();
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 0, 0});
+    cu->chunks_.push_back(suru::vm::Chunk {"foo", foo_begin, foo_end, 0, 0, 1});
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+
+    try {
+        vm.call(0, 0);
+        FAIL() << "Expected runtime_error";
+    } catch (const std::runtime_error& e) {
+        EXPECT_STREQ(e.what(), "upvalue capture stack underflow");
+    } catch (...) {
+        FAIL() << "Expected std::runtime_error";
+    }
 }
 

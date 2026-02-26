@@ -163,7 +163,7 @@ void VM::run_c_frame() {
     const std::size_t expected = i_stack_.back().ret_slots;
     const std::size_t produced_base = v_stack_.size();
 
-    current->cfunc(this, current);
+    current->cfunc(this);
     // i_stack_ can be reallocated by nested vm.call().
     // thus a reference to i_stack_.back() is dangerous.
 
@@ -418,7 +418,29 @@ void VM::run(std::size_t target_depth) {
                 }
                 const Chunk& chunk = cu->chunks_[chunk_index];
                 Closure* closure = make_closure(cu, chunk_index, chunk.upvalues);
+                if (stack_top() < chunk.upvalues) {
+                    throw std::runtime_error("upvalue capture stack underflow");
+                }
+                for (std::size_t i = chunk.upvalues; i > 0; --i) {
+                    closure->at(i - 1U) = pop_value();
+                }
                 v_stack_.push_back(Value::closure(closure));
+                break;
+            }
+            case Op::GetUpvalue: {
+                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                if (idx >= current->len) {
+                    throw std::runtime_error("upvalue index out of bounds");
+                }
+                v_stack_.push_back(current->at(idx));
+                break;
+            }
+            case Op::SetUpvalue: {
+                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                if (idx >= current->len) {
+                    throw std::runtime_error("upvalue index out of bounds");
+                }
+                current->at(idx) = pop_value();
                 break;
             }
             case Op::Return: {

@@ -130,5 +130,19 @@ Value VM::getlocal(std::size_t index) const {
     return v_stack_[at];
 }
 
+Value VM::getupvalue(std::size_t index) const {
+    if (i_stack_.empty()) {
+        throw std::runtime_error("call frame is not available");
+    }
+    Closure* closure = i_stack_.back().closure;
+    if (closure == nullptr) {
+        throw std::runtime_error("call frame closure is not available");
+    }
+    if (index >= closure->len) {
+        throw std::runtime_error("upvalue index out of bounds");
+    }
+    return closure->at(index);
+}
+
 } // namespace suru::vm
 

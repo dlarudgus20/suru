@@ -1,0 +1,26 @@
+.const
+k_init = number 41
+k_one = number 1
+k_result = string "result"
+
+.chunk main 0 1 0
+CONST k_init
+CLOSURE inc
+SET_LOCAL 0
+
+GET_LOCAL 0
+CALL 0 1
+POP
+
+GET_LOCAL 0
+CALL 0 1
+SET_GLOBAL k_result
+RETURN 0
+
+.chunk inc 0 0 1
+GET_UPVALUE 0
+CONST k_one
+ADD
+SET_UPVALUE 0
+GET_UPVALUE 0
+RETURN 1

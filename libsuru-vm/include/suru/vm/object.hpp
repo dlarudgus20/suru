@@ -10,7 +10,7 @@ namespace suru::vm {
 
 class VM;
 struct Closure;
-using CFunction = void (*)(VM* vm, Closure* self);
+using CFunction = void (*)(VM* vm);
 
 enum class ObjectKind {
     String,

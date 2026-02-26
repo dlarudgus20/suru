@@ -55,9 +55,7 @@ suru::vm::Value std_nil() {
     return suru::vm::Value::nil();
 }
 
-void std_print(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm == nullptr) {
+void std_print(suru::vm::VM* vm) {    if (vm == nullptr) {
         throw std::runtime_error("print: vm is null");
     }
 
@@ -70,9 +68,7 @@ void std_print(suru::vm::VM* vm, suru::vm::Closure* self) {
     std::cout << '\n';
 }
 
-void std_read_line(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() >= 1U) {
+void std_read_line(suru::vm::VM* vm) {    if (vm->stack_top() >= 1U) {
         suru::vm::Value prompt = vm->getlocal(0);
         if (prompt.kind != suru::vm::ValueKind::String || prompt.string_ == nullptr) {
             vm->push_value(std_nil());
@@ -90,9 +86,7 @@ void std_read_line(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::string(vm->make_string(line)));
 }
 
-void std_to_number(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U) {
+void std_to_number(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -121,9 +115,7 @@ void std_to_number(suru::vm::VM* vm, suru::vm::Closure* self) {
     }
 }
 
-void std_to_string(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U) {
+void std_to_string(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -137,9 +129,7 @@ void std_to_string(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::string(vm->make_string(value_to_string(arg))));
 }
 
-void std_type(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U) {
+void std_type(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -159,9 +149,7 @@ void std_type(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::string(vm->make_string(name)));
 }
 
-void std_measure(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U) {
+void std_measure(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -181,9 +169,7 @@ void std_measure(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::number(elapsed.count()));
 }
 
-void str_trim(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U) {
+void str_trim(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -206,9 +192,7 @@ void str_trim(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::string(vm->make_string(sv.substr(begin, end - begin))));
 }
 
-void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 2U) {
+void str_split(suru::vm::VM* vm) {    if (vm->stack_top() < 2U) {
         vm->push_value(std_nil());
         return;
     }
@@ -261,9 +245,7 @@ void str_split(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::table(out));
 }
 
-void table_keys(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U) {
+void table_keys(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -283,9 +265,7 @@ void table_keys(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::table(out));
 }
 
-void table_push(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 2U) {
+void table_push(suru::vm::VM* vm) {    if (vm->stack_top() < 2U) {
         vm->push_value(std_nil());
         return;
     }
@@ -306,9 +286,7 @@ void table_push(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(suru::vm::Value::number(next_index + 1.0));
 }
 
-void table_pop(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U) {
+void table_pop(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
     }
@@ -335,27 +313,21 @@ void table_pop(suru::vm::VM* vm, suru::vm::Closure* self) {
     vm->push_value(out);
 }
 
-void math_abs(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
+void math_abs(suru::vm::VM* vm) {    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
     vm->push_value(suru::vm::Value::number(std::abs(vm->getlocal(0).number_)));
 }
 
-void math_floor(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
+void math_floor(suru::vm::VM* vm) {    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
     vm->push_value(suru::vm::Value::number(std::floor(vm->getlocal(0).number_)));
 }
 
-void math_ceil(suru::vm::VM* vm, suru::vm::Closure* self) {
-    (void)self;
-    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
+void math_ceil(suru::vm::VM* vm) {    if (vm->stack_top() < 1U || vm->getlocal(0).kind != suru::vm::ValueKind::Number) {
         vm->push_value(std_nil());
         return;
     }
