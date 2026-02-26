@@ -1,218 +1,59 @@
 .const
 k_print = string "print"
-k_to_number = string "to_number"
-k_type = string "type"
 k_measure = string "measure"
-k_str = string "str"
-k_table = string "table"
-k_math = string "math"
-k_trim = string "trim"
-k_split = string "split"
-k_push = string "push"
-k_pop = string "pop"
-k_keys = string "keys"
-k_abs = string "abs"
 k_val = string "val"
-k_banner = string "== suru-bc sample =="
-k_num_text = string "123.5"
-k_spaces = string "  alpha,beta,,gamma  "
-k_comma = string ","
-k_extra = string "delta"
-k_msg_num = string "num:"
-k_msg_trim = string "trimmed:"
-k_msg_pop = string "popped:"
-k_msg_keys = string "keys type:"
-k_msg_add = string "add2(40,2):"
-k_msg_abs = string "abs(-7):"
-k_msg_measure = string "work() elapsed(sec):"
-k_msg_pi = string "pi approximation:"
-k_n40 = number 40
-k_n2 = number 2
-k_n7n = number -7
-k_n0 = number 0
-k_n1 = number 1
-k_n4 = number 4
-k_n_loop = number 120000
+k_msg = string "== suru-bc register sample =="
+k_elapsed = string "elapsed(sec):"
+k_pi = string "pi approximation:"
+k_0 = number 0
+k_1 = number 1
+k_2 = number 2
+k_4 = number 4
+k_loop = number 120000
 
 .chunk main 0 8 0
-; print("== suru-bc sample ==")
-GET_GLOBAL k_print
-CONST k_banner
-CALL 1 0
+GETGLOBAL 0 k_print
+LOADK 1 k_msg
+CALL 0 1 0
 
-; num = to_number("123.5")
-GET_GLOBAL k_to_number
-CONST k_num_text
-CALL 1 1
-SET_LOCAL 0
+GETGLOBAL 0 k_measure
+CLOSURE 1 work
+CALL 0 1 1
+MOVE 2 0
 
-; print("num:", num, type(num))
-GET_GLOBAL k_print
-CONST k_msg_num
-GET_LOCAL 0
-GET_GLOBAL k_type
-GET_LOCAL 0
-CALL 1 1
-CALL 3 0
+GETGLOBAL 0 k_print
+LOADK 1 k_elapsed
+MOVE 2 2
+CALL 0 2 0
 
-; trimmed = str.trim("  alpha,beta,,gamma  ")
-GET_GLOBAL k_str
-CONST k_trim
-GET_TABLE
-CONST k_spaces
-CALL 1 1
-SET_LOCAL 1
+GETGLOBAL 0 k_print
+LOADK 1 k_pi
+GETGLOBAL 2 k_val
+CALL 0 2 0
 
-; parts = str.split(trimmed, ",", true)
-GET_GLOBAL k_str
-CONST k_split
-GET_TABLE
-GET_LOCAL 1
-CONST k_comma
-TRUE
-CALL 3 1
-SET_LOCAL 2
+RETURN 0 0
 
-; table.push(parts, "delta")
-GET_GLOBAL k_table
-CONST k_push
-GET_TABLE
-GET_LOCAL 2
-CONST k_extra
-CALL 2 1
-POP
-
-; popped = table.pop(parts)
-GET_GLOBAL k_table
-CONST k_pop
-GET_TABLE
-GET_LOCAL 2
-CALL 1 1
-SET_LOCAL 3
-
-; keys = table.keys(parts)
-GET_GLOBAL k_table
-CONST k_keys
-GET_TABLE
-GET_LOCAL 2
-CALL 1 1
-SET_LOCAL 4
-
-; print("trimmed:", trimmed)
-GET_GLOBAL k_print
-CONST k_msg_trim
-GET_LOCAL 1
-CALL 2 0
-
-; print("popped:", popped)
-GET_GLOBAL k_print
-CONST k_msg_pop
-GET_LOCAL 3
-CALL 2 0
-
-; print("keys type:", type(keys))
-GET_GLOBAL k_print
-CONST k_msg_keys
-GET_GLOBAL k_type
-GET_LOCAL 4
-CALL 1 1
-CALL 2 0
-
-; print("add2(40,2):", add2(40, 2))
-GET_GLOBAL k_print
-CONST k_msg_add
-CLOSURE add2
-CONST k_n40
-CONST k_n2
-CALL 2 1
-CALL 2 0
-
-; print("abs(-7):", math.abs(-7))
-GET_GLOBAL k_print
-CONST k_msg_abs
-GET_GLOBAL k_math
-CONST k_abs
-GET_TABLE
-CONST k_n7n
-CALL 1 1
-CALL 2 0
-
-; print("work() elapsed(sec):", measure(work))
-GET_GLOBAL k_print
-CONST k_msg_measure
-GET_GLOBAL k_measure
-CLOSURE work
-CALL 1 1
-CALL 2 0
-
-; print("pi approximation:", val)
-GET_GLOBAL k_print
-CONST k_msg_pi
-GET_GLOBAL k_val
-CALL 2 0
-
-RETURN 0
-
-.chunk add2 2 2 0
-GET_LOCAL 0
-GET_LOCAL 1
-ADD
-RETURN 1
-
-.chunk work 0 6 0
-; Leibniz series: pi ~= 4 * sum((-1)^i / (2i + 1))
-; local0 = i, local1 = sum, local2 = sign, local3 = denom, local4 = term, local5 = pi
-CONST k_n0
-SET_LOCAL 0
-CONST k_n0
-SET_LOCAL 1
-CONST k_n1
-SET_LOCAL 2
+.chunk work 0 10 0
+LOADK 0 k_0
+LOADK 1 k_0
+LOADK 2 k_1
+LOADK 3 k_loop
+LOADK 4 k_2
+LOADK 5 k_1
+LOADK 6 k_4
 
 loop_begin:
-GET_LOCAL 0
-CONST k_n_loop
-LT
-JMP_IF_FALSE loop_end
-
-; denom = 2*i + 1
-GET_LOCAL 0
-CONST k_n2
-MUL
-CONST k_n1
-ADD
-SET_LOCAL 3
-
-; term = sign / denom
-GET_LOCAL 2
-GET_LOCAL 3
-DIV
-SET_LOCAL 4
-
-; sum = sum + term
-GET_LOCAL 1
-GET_LOCAL 4
-ADD
-SET_LOCAL 1
-
-; sign = -sign
-CONST k_n0
-GET_LOCAL 2
-SUB
-SET_LOCAL 2
-
-; i = i + 1
-GET_LOCAL 0
-CONST k_n1
-ADD
-SET_LOCAL 0
-
+LT 9 0 3
+JMPIF 9 loop_end
+MUL 7 0 4
+ADD 7 7 5
+DIV 8 2 7
+ADD 1 1 8
+NEG 2 2
+ADD 0 0 5
 JMP loop_begin
+
 loop_end:
-GET_LOCAL 1
-CONST k_n4
-MUL
-SET_LOCAL 5
-GET_LOCAL 5
-SET_GLOBAL k_val
-RETURN 0
+MUL 7 1 6
+SETGLOBAL k_val 7
+RETURN 0 0

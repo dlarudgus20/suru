@@ -5,15 +5,13 @@
 namespace suru::vm {
 
 enum class Op : std::uint8_t {
-    Pop = 0x01,
+    Move = 0x01,
 
-    Nil = 0x02,
-    True = 0x03,
-    False = 0x04,
-    Const = 0x05,
+    LoadNil = 0x02,
+    LoadTrue = 0x03,
+    LoadFalse = 0x04,
+    LoadK = 0x05,
 
-    GetLocal = 0x06,
-    SetLocal = 0x07,
     GetGlobal = 0x08,
     SetGlobal = 0x09,
 

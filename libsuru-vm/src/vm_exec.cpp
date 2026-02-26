@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "suru/vm/opcode.hpp"
@@ -92,21 +93,75 @@ std::int64_t read_sleb(const CodeUnit& cu, std::size_t code_end, std::size_t& pc
     return value;
 }
 
-void push_results(std::vector<Value>& stack, const std::vector<Value>& results, std::size_t expected) {
-    if (expected == 0) {
-        return;
+Value reg_read(std::size_t base, std::size_t limit, const std::vector<Value>& stack, std::size_t index) {
+    const std::size_t at = base + index;
+    if (at >= limit) {
+        throw std::runtime_error("register index out of bounds");
     }
+    if (at >= stack.size()) {
+        throw std::runtime_error("register read out of stack bounds");
+    }
+    return stack[at];
+}
 
-    const std::size_t emit = (results.size() < expected) ? results.size() : expected;
-    for (std::size_t i = 0; i < emit; ++i) {
-        stack.push_back(results[i]);
+void reg_write(std::size_t base, std::size_t limit, std::vector<Value>& stack, std::size_t index, Value value) {
+    const std::size_t at = base + index;
+    if (at >= limit) {
+        throw std::runtime_error("register index out of bounds");
     }
-    for (std::size_t i = emit; i < expected; ++i) {
-        stack.push_back(Value::nil());
+    if (at >= stack.size()) {
+        throw std::runtime_error("register write out of stack bounds");
     }
+    stack[at] = value;
 }
 
 } // namespace
+
+void VM::finish_frame_return(
+    std::size_t frame_base,
+    std::size_t expected,
+    std::size_t result_begin,
+    std::size_t result_end
+) {
+    if (i_stack_.empty()) {
+        throw std::runtime_error("call stack is not initialized");
+    }
+    if (result_begin > result_end || result_end > v_stack_.size()) {
+        throw std::runtime_error("invalid return result range");
+    }
+
+    CallFrame& caller = i_stack_.back();
+    const std::size_t available = result_end - result_begin;
+    const std::size_t emit = (available < expected) ? available : expected;
+
+    if (caller.closure != nullptr && caller.closure->code != nullptr) {
+        if (caller.call_retc != expected) {
+            throw std::runtime_error("call return count mismatch");
+        }
+        const std::size_t caller_limit = frame_base;
+        if (caller.base + caller.call_dst + expected > caller_limit) {
+            throw std::runtime_error("call return range out of bounds");
+        }
+        for (std::size_t i = 0; i < emit; ++i) {
+            reg_write(caller.base, caller_limit, v_stack_, caller.call_dst + i, v_stack_[result_begin + i]);
+        }
+        for (std::size_t i = emit; i < expected; ++i) {
+            reg_write(caller.base, caller_limit, v_stack_, caller.call_dst + i, Value::nil());
+        }
+        v_stack_.resize(frame_base);
+        caller.call_dst = 0;
+        caller.call_retc = 0;
+        return;
+    }
+
+    for (std::size_t i = 0; i < emit; ++i) {
+        v_stack_[frame_base + i] = v_stack_[result_begin + i];
+    }
+    v_stack_.resize(frame_base + expected);
+    for (std::size_t i = emit; i < expected; ++i) {
+        v_stack_[frame_base + i] = Value::nil();
+    }
+}
 
 void VM::make_call_frame(std::size_t arg_count, std::size_t ret_slots) {
     if (v_stack_.size() < arg_count + 1U) {
@@ -121,7 +176,7 @@ void VM::make_call_frame(std::size_t arg_count, std::size_t ret_slots) {
             v_stack_[callee_index + i] = v_stack_[callee_index + 1U + i];
         }
         v_stack_.resize(v_stack_.size() - 1U);
-        i_stack_.push_back(CallFrame {callee, 0, callee_index, 0, ret_slots});
+        i_stack_.push_back(CallFrame {callee, 0, callee_index, 0, ret_slots, 0, 0});
         return;
     }
 
@@ -133,27 +188,25 @@ void VM::make_call_frame(std::size_t arg_count, std::size_t ret_slots) {
         throw std::runtime_error("chunk arity exceeds slots");
     }
 
-    std::vector<Value> params;
-    params.reserve(callee_chunk.arity);
     const std::size_t copied = (arg_count < callee_chunk.arity) ? arg_count : callee_chunk.arity;
     for (std::size_t i = 0; i < copied; ++i) {
-        params.push_back(v_stack_[callee_index + 1U + i]);
-    }
-    for (std::size_t i = copied; i < callee_chunk.arity; ++i) {
-        params.push_back(Value::nil());
+        v_stack_[callee_index + i] = v_stack_[callee_index + 1U + i];
     }
 
-    v_stack_.resize(callee_index);
-    for (Value value : params) {
-        v_stack_.push_back(value);
+    const std::size_t new_size = callee_index + callee_chunk.slots;
+    const std::size_t clear_end = (new_size < v_stack_.size()) ? new_size : v_stack_.size();
+    for (std::size_t at = callee_index + copied; at < clear_end; ++at) {
+        v_stack_[at] = Value::nil();
     }
-    v_stack_.resize(callee_index + callee_chunk.slots, Value::nil());
+    v_stack_.resize(new_size, Value::nil());
     i_stack_.push_back(CallFrame {
         callee,
         callee_chunk.code_begin,
         callee_index,
         callee_chunk.code_end,
         ret_slots,
+        0,
+        0,
     });
 }
 
@@ -171,8 +224,6 @@ void VM::run_c_frame() {
     const std::size_t produced_base = v_stack_.size();
 
     current->cfunc(this);
-    // i_stack_ can be reallocated by nested vm.call().
-    // thus a reference to i_stack_.back() is dangerous.
 
     if (v_stack_.size() < frame_base) {
         throw std::runtime_error("frame stack underflow");
@@ -180,19 +231,12 @@ void VM::run_c_frame() {
 
     std::size_t result_begin = produced_base;
     if (v_stack_.size() < produced_base) {
-        // C function popped into its argument/local area.
         result_begin = frame_base;
     }
 
-    std::vector<Value> produced;
-    produced.reserve(v_stack_.size() - result_begin);
-    for (std::size_t i = result_begin; i < v_stack_.size(); ++i) {
-        produced.push_back(v_stack_[i]);
-    }
-
+    const std::size_t result_end = v_stack_.size();
     i_stack_.pop_back();
-    v_stack_.resize(frame_base);
-    push_results(v_stack_, produced, expected);
+    finish_frame_return(frame_base, expected, result_begin, result_end);
 }
 
 void VM::run(std::size_t target_depth) {
@@ -209,13 +253,9 @@ void VM::run(std::size_t target_depth) {
         }
 
         CodeUnit* cu = current->code;
+        const std::size_t frame_limit = v_stack_.size();
         if (frame.pc >= frame.code_end) {
-            i_stack_.pop_back();
-            const std::size_t expected = frame.ret_slots;
-            const std::size_t base_to_restore = frame.base;
-            v_stack_.resize(base_to_restore);
-            push_results(v_stack_, {}, expected);
-            continue;
+            throw std::runtime_error("unexpected end of chunk");
         }
 
         if (frame.pc >= cu->opcodes_.size()) {
@@ -224,45 +264,43 @@ void VM::run(std::size_t target_depth) {
 
         const Op op = static_cast<Op>(cu->opcodes_[frame.pc++]);
         switch (op) {
-            case Op::Pop: {
-                (void)pop_value();
+            case Op::Move: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                reg_write(frame.base, frame_limit, v_stack_, a, reg_read(frame.base, frame_limit, v_stack_, b));
                 break;
             }
-            case Op::Nil: v_stack_.push_back(Value::nil()); break;
-            case Op::True: v_stack_.push_back(Value::boolean(true)); break;
-            case Op::False: v_stack_.push_back(Value::boolean(false)); break;
-            case Op::Const: {
-                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                if (idx >= cu->constants_.size()) {
+            case Op::LoadNil: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                reg_write(frame.base, frame_limit, v_stack_, a, Value::nil());
+                break;
+            }
+            case Op::LoadTrue: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(true));
+                break;
+            }
+            case Op::LoadFalse: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(false));
+                break;
+            }
+            case Op::LoadK: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t k = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                if (k >= cu->constants_.size()) {
                     throw std::runtime_error("constant index out of bounds");
                 }
-                v_stack_.push_back(cu->constants_[idx]);
-                break;
-            }
-            case Op::GetLocal: {
-                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t slot = frame.base + idx;
-                if (slot >= v_stack_.size()) {
-                    throw std::runtime_error("local slot out of bounds");
-                }
-                v_stack_.push_back(v_stack_[slot]);
-                break;
-            }
-            case Op::SetLocal: {
-                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                const std::size_t slot = frame.base + idx;
-                if (slot >= v_stack_.size()) {
-                    throw std::runtime_error("local slot out of bounds");
-                }
-                v_stack_[slot] = pop_value();
+                reg_write(frame.base, frame_limit, v_stack_, a, cu->constants_[k]);
                 break;
             }
             case Op::GetGlobal: {
-                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                if (idx >= cu->constants_.size()) {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t k = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
-                const Value key = cu->constants_[idx];
+                const Value key = cu->constants_[k];
                 if (key.kind != ValueKind::String) {
                     throw std::runtime_error("global key must be string");
                 }
@@ -270,19 +308,20 @@ void VM::run(std::size_t target_depth) {
                 if (!globals()->get(key, &out)) {
                     out = Value::nil();
                 }
-                v_stack_.push_back(out);
+                reg_write(frame.base, frame_limit, v_stack_, a, out);
                 break;
             }
             case Op::SetGlobal: {
-                const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                if (idx >= cu->constants_.size()) {
+                const std::size_t k = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
-                const Value key = cu->constants_[idx];
+                const Value key = cu->constants_[k];
                 if (key.kind != ValueKind::String) {
                     throw std::runtime_error("global key must be string");
                 }
-                const Value value = pop_value();
+                const Value value = reg_read(frame.base, frame_limit, v_stack_, a);
                 if (!globals()->set(key, value)) {
                     throw std::runtime_error("failed to set global value");
                 }
@@ -294,9 +333,67 @@ void VM::run(std::size_t target_depth) {
             case Op::Div:
             case Op::Idiv:
             case Op::Mod:
-            case Op::Pow: {
-                const Value rhs_v = pop_value();
-                const Value lhs_v = pop_value();
+            case Op::Pow:
+            case Op::Band:
+            case Op::Bor:
+            case Op::Bxor:
+            case Op::Shl:
+            case Op::Shr:
+            case Op::Eq:
+            case Op::Ne:
+            case Op::Lt:
+            case Op::Le:
+            case Op::Gt:
+            case Op::Ge:
+            case Op::And:
+            case Op::Or: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t c = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const Value lhs_v = reg_read(frame.base, frame_limit, v_stack_, b);
+                const Value rhs_v = reg_read(frame.base, frame_limit, v_stack_, c);
+
+                if (op == Op::Eq || op == Op::Ne) {
+                    const bool eq = value_equals(lhs_v, rhs_v);
+                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(op == Op::Eq ? eq : !eq));
+                    break;
+                }
+                if (op == Op::Lt || op == Op::Le || op == Op::Gt || op == Op::Ge) {
+                    const double lhs = require_number(lhs_v, "compare");
+                    const double rhs = require_number(rhs_v, "compare");
+                    bool result = false;
+                    switch (op) {
+                        case Op::Lt: result = lhs < rhs; break;
+                        case Op::Le: result = lhs <= rhs; break;
+                        case Op::Gt: result = lhs > rhs; break;
+                        case Op::Ge: result = lhs >= rhs; break;
+                        default: break;
+                    }
+                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(result));
+                    break;
+                }
+                if (op == Op::And || op == Op::Or) {
+                    const bool lhs = require_boolean(lhs_v, "logical op");
+                    const bool rhs = require_boolean(rhs_v, "logical op");
+                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(op == Op::And ? (lhs && rhs) : (lhs || rhs)));
+                    break;
+                }
+                if (op == Op::Band || op == Op::Bor || op == Op::Bxor || op == Op::Shl || op == Op::Shr) {
+                    const std::int64_t lhs = require_integer(lhs_v, "bit op");
+                    const std::int64_t rhs = require_integer(rhs_v, "bit op");
+                    std::int64_t result = 0;
+                    switch (op) {
+                        case Op::Band: result = lhs & rhs; break;
+                        case Op::Bor: result = lhs | rhs; break;
+                        case Op::Bxor: result = lhs ^ rhs; break;
+                        case Op::Shl: result = lhs << rhs; break;
+                        case Op::Shr: result = lhs >> rhs; break;
+                        default: break;
+                    }
+                    reg_write(frame.base, frame_limit, v_stack_, a, Value::number(static_cast<double>(result)));
+                    break;
+                }
+
                 const double lhs = require_number(lhs_v, "binary op");
                 const double rhs = require_number(rhs_v, "binary op");
                 double result = 0.0;
@@ -310,90 +407,45 @@ void VM::run(std::size_t target_depth) {
                     case Op::Pow: result = std::pow(lhs, rhs); break;
                     default: break;
                 }
-                v_stack_.push_back(Value::number(result));
+                reg_write(frame.base, frame_limit, v_stack_, a, Value::number(result));
                 break;
             }
-            case Op::Neg: {
-                const double v = require_number(pop_value(), "neg");
-                v_stack_.push_back(Value::number(-v));
-                break;
-            }
+            case Op::Neg:
             case Op::Not: {
-                v_stack_.push_back(Value::boolean(is_falsey(pop_value())));
-                break;
-            }
-            case Op::And:
-            case Op::Or: {
-                const bool rhs = require_boolean(pop_value(), "logical op");
-                const bool lhs = require_boolean(pop_value(), "logical op");
-                v_stack_.push_back(Value::boolean(op == Op::And ? (lhs && rhs) : (lhs || rhs)));
-                break;
-            }
-            case Op::Eq:
-            case Op::Ne: {
-                const Value rhs = pop_value();
-                const Value lhs = pop_value();
-                const bool eq = value_equals(lhs, rhs);
-                v_stack_.push_back(Value::boolean(op == Op::Eq ? eq : !eq));
-                break;
-            }
-            case Op::Lt:
-            case Op::Le:
-            case Op::Gt:
-            case Op::Ge: {
-                const double rhs = require_number(pop_value(), "compare");
-                const double lhs = require_number(pop_value(), "compare");
-                bool result = false;
-                switch (op) {
-                    case Op::Lt: result = lhs < rhs; break;
-                    case Op::Le: result = lhs <= rhs; break;
-                    case Op::Gt: result = lhs > rhs; break;
-                    case Op::Ge: result = lhs >= rhs; break;
-                    default: break;
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const Value input = reg_read(frame.base, frame_limit, v_stack_, b);
+                if (op == Op::Neg) {
+                    reg_write(frame.base, frame_limit, v_stack_, a, Value::number(-require_number(input, "neg")));
+                } else {
+                    reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(is_falsey(input)));
                 }
-                v_stack_.push_back(Value::boolean(result));
-                break;
-            }
-            case Op::Band:
-            case Op::Bor:
-            case Op::Bxor:
-            case Op::Shl:
-            case Op::Shr: {
-                const std::int64_t rhs = require_integer(pop_value(), "bit op");
-                const std::int64_t lhs = require_integer(pop_value(), "bit op");
-                std::int64_t result = 0;
-                switch (op) {
-                    case Op::Band: result = lhs & rhs; break;
-                    case Op::Bor: result = lhs | rhs; break;
-                    case Op::Bxor: result = lhs ^ rhs; break;
-                    case Op::Shl: result = lhs << rhs; break;
-                    case Op::Shr: result = lhs >> rhs; break;
-                    default: break;
-                }
-                v_stack_.push_back(Value::number(static_cast<double>(result)));
                 break;
             }
             case Op::NewTable: {
-                v_stack_.push_back(Value::table(make_table()));
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                reg_write(frame.base, frame_limit, v_stack_, a, Value::table(make_table()));
                 break;
             }
             case Op::GetTable: {
-                const Value key = pop_value();
-                const Value table_v = pop_value();
-                Table* table = require_table(table_v, "gettable");
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t c = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, b), "gettable");
+                const Value key = reg_read(frame.base, frame_limit, v_stack_, c);
                 Value out = Value::nil();
                 if (!table->get(key, &out)) {
                     out = Value::nil();
                 }
-                v_stack_.push_back(out);
+                reg_write(frame.base, frame_limit, v_stack_, a, out);
                 break;
             }
             case Op::SetTable: {
-                const Value value = pop_value();
-                const Value key = pop_value();
-                const Value table_v = pop_value();
-                Table* table = require_table(table_v, "settable");
-                if (!table->set(key, value)) {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t b = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t c = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, a), "settable");
+                if (!table->set(reg_read(frame.base, frame_limit, v_stack_, b), reg_read(frame.base, frame_limit, v_stack_, c))) {
                     throw std::runtime_error("failed to set table key");
                 }
                 break;
@@ -408,8 +460,9 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::JmpIfFalse: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 const std::int64_t rel = read_sleb(*cu, frame.code_end, frame.pc);
-                const Value cond = pop_value();
+                const Value cond = reg_read(frame.base, frame_limit, v_stack_, a);
                 if (is_falsey(cond)) {
                     const std::int64_t next = static_cast<std::int64_t>(frame.pc) + rel;
                     if (next < 0 || static_cast<std::size_t>(next) > frame.code_end) {
@@ -420,59 +473,77 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::Call: {
+                const std::size_t f = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 const std::size_t arg_count = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 const std::size_t ret_count = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t avail = frame_limit - frame.base;
+                if (f >= avail) {
+                    throw std::runtime_error("call register index out of bounds");
+                }
+                if (f + 1U + arg_count > avail) {
+                    throw std::runtime_error("call argument range out of bounds");
+                }
+                if (f + ret_count > avail) {
+                    throw std::runtime_error("call return range out of bounds");
+                }
+
+                frame.call_dst = f;
+                frame.call_retc = ret_count;
+                v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f));
+                for (std::size_t i = 0; i < arg_count; ++i) {
+                    v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f + 1U + i));
+                }
                 make_call_frame(arg_count, ret_count);
                 break;
             }
             case Op::Closure: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 const std::size_t chunk_index = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 if (chunk_index >= cu->chunks_.size()) {
                     throw std::runtime_error("closure chunk index out of bounds");
                 }
                 const Chunk& chunk = cu->chunks_[chunk_index];
+                if (frame.base + a + chunk.upvalues >= frame_limit) {
+                    throw std::runtime_error("upvalue capture register range out of bounds");
+                }
                 Closure* closure = make_closure(cu, chunk_index, chunk.upvalues);
-                if (stack_top() < chunk.upvalues) {
-                    throw std::runtime_error("upvalue capture stack underflow");
+                for (std::size_t i = 0; i < chunk.upvalues; ++i) {
+                    closure->at(i) = reg_read(frame.base, frame_limit, v_stack_, a + 1U + i);
                 }
-                for (std::size_t i = chunk.upvalues; i > 0; --i) {
-                    closure->at(i - 1U) = pop_value();
-                }
-                v_stack_.push_back(Value::closure(closure));
+                reg_write(frame.base, frame_limit, v_stack_, a, Value::closure(closure));
                 break;
             }
             case Op::GetUpvalue: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 if (idx >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
-                v_stack_.push_back(current->at(idx));
+                reg_write(frame.base, frame_limit, v_stack_, a, current->at(idx));
                 break;
             }
             case Op::SetUpvalue: {
                 const std::size_t idx = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 if (idx >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
-                current->at(idx) = pop_value();
+                current->at(idx) = reg_read(frame.base, frame_limit, v_stack_, a);
                 break;
             }
             case Op::Return: {
+                const std::size_t a = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
                 const std::size_t ret_count = static_cast<std::size_t>(read_uleb(*cu, frame.code_end, frame.pc));
-                if (v_stack_.size() < ret_count) {
-                    throw std::runtime_error("return stack underflow");
-                }
-
-                std::vector<Value> results(ret_count);
-                for (std::size_t i = 0; i < ret_count; ++i) {
-                    results[ret_count - 1U - i] = pop_value();
+                if (frame.base + a + ret_count > frame_limit) {
+                    throw std::runtime_error("return register range out of bounds");
                 }
 
                 const std::size_t frame_base = frame.base;
                 const std::size_t expected = frame.ret_slots;
+                const std::size_t result_begin = frame_base + a;
+                const std::size_t result_end = result_begin + ret_count;
                 i_stack_.pop_back();
-                v_stack_.resize(frame_base);
-                push_results(v_stack_, results, expected);
+                finish_frame_return(frame_base, expected, result_begin, result_end);
                 break;
             }
             default:
@@ -492,3 +563,4 @@ void VM::call(std::size_t arg_count, std::size_t ret_slots) {
 }
 
 } // namespace suru::vm
+

@@ -1,26 +1,28 @@
 .const
-k_init = number 41
-k_one = number 1
-k_result = string "result"
+k_print = string "print"
+k_msg1 = string "first="
+k_msg2 = string "second="
+k_41 = number 41
+k_1 = number 1
 
-.chunk main 0 1 0
-CONST k_init
-CLOSURE inc
-SET_LOCAL 0
+.chunk main 0 8 0
+LOADK 1 k_41
+CLOSURE 0 inc
+GETGLOBAL 2 k_print
+LOADK 3 k_msg1
+MOVE 4 0
+CALL 4 0 1
+CALL 2 2 0
+GETGLOBAL 2 k_print
+LOADK 3 k_msg2
+MOVE 4 0
+CALL 4 0 1
+CALL 2 2 0
+RETURN 0 0
 
-GET_LOCAL 0
-CALL 0 1
-POP
-
-GET_LOCAL 0
-CALL 0 1
-SET_GLOBAL k_result
-RETURN 0
-
-.chunk inc 0 0 1
-GET_UPVALUE 0
-CONST k_one
-ADD
-SET_UPVALUE 0
-GET_UPVALUE 0
-RETURN 1
+.chunk inc 0 2 1
+GETUPVAL 0 0
+LOADK 1 k_1
+ADD 0 0 1
+SETUPVAL 0 0
+RETURN 0 1

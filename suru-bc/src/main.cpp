@@ -156,15 +156,13 @@ std::uint64_t parse_u64(std::string_view text, int line, std::string_view what) 
 
 suru::vm::Op parse_op(std::string_view op, int line) {
     static const std::unordered_map<std::string, suru::vm::Op> kOps {
-        {"POP", suru::vm::Op::Pop},
-        {"NIL", suru::vm::Op::Nil},
-        {"TRUE", suru::vm::Op::True},
-        {"FALSE", suru::vm::Op::False},
-        {"CONST", suru::vm::Op::Const},
-        {"GET_LOCAL", suru::vm::Op::GetLocal},
-        {"SET_LOCAL", suru::vm::Op::SetLocal},
-        {"GET_GLOBAL", suru::vm::Op::GetGlobal},
-        {"SET_GLOBAL", suru::vm::Op::SetGlobal},
+        {"MOVE", suru::vm::Op::Move},
+        {"LOADNIL", suru::vm::Op::LoadNil},
+        {"LOADTRUE", suru::vm::Op::LoadTrue},
+        {"LOADFALSE", suru::vm::Op::LoadFalse},
+        {"LOADK", suru::vm::Op::LoadK},
+        {"GETGLOBAL", suru::vm::Op::GetGlobal},
+        {"SETGLOBAL", suru::vm::Op::SetGlobal},
         {"ADD", suru::vm::Op::Add},
         {"SUB", suru::vm::Op::Sub},
         {"MUL", suru::vm::Op::Mul},
@@ -187,16 +185,16 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"BXOR", suru::vm::Op::Bxor},
         {"SHL", suru::vm::Op::Shl},
         {"SHR", suru::vm::Op::Shr},
-        {"NEW_TABLE", suru::vm::Op::NewTable},
-        {"GET_TABLE", suru::vm::Op::GetTable},
-        {"SET_TABLE", suru::vm::Op::SetTable},
+        {"NEWTABLE", suru::vm::Op::NewTable},
+        {"GETTABLE", suru::vm::Op::GetTable},
+        {"SETTABLE", suru::vm::Op::SetTable},
         {"JMP", suru::vm::Op::Jmp},
-        {"JMP_IF_FALSE", suru::vm::Op::JmpIfFalse},
+        {"JMPIF", suru::vm::Op::JmpIfFalse},
         {"CALL", suru::vm::Op::Call},
         {"RETURN", suru::vm::Op::Return},
         {"CLOSURE", suru::vm::Op::Closure},
-        {"GET_UPVALUE", suru::vm::Op::GetUpvalue},
-        {"SET_UPVALUE", suru::vm::Op::SetUpvalue},
+        {"GETUPVAL", suru::vm::Op::GetUpvalue},
+        {"SETUPVAL", suru::vm::Op::SetUpvalue},
     };
 
     const auto it = kOps.find(std::string(op));
@@ -206,59 +204,118 @@ suru::vm::Op parse_op(std::string_view op, int line) {
     return it->second;
 }
 
+std::size_t resolve_index(
+    std::string_view token,
+    int line,
+    std::string_view what,
+    const std::unordered_map<std::string, std::size_t>& map
+) {
+    const auto it = map.find(std::string(token));
+    if (it != map.end()) {
+        return it->second;
+    }
+    return static_cast<std::size_t>(parse_u64(token, line, what));
+}
+
 std::size_t inst_size(
     const InstDef& inst,
     const std::unordered_map<std::string, std::size_t>& const_index,
     const std::unordered_map<std::string, std::size_t>& chunk_index
 ) {
     const suru::vm::Op op = parse_op(inst.op, inst.line);
+    auto uleb = [&](std::string_view tok, std::string_view what, const std::unordered_map<std::string, std::size_t>* map) -> std::size_t {
+        if (map == nullptr) {
+            return encoded_uleb_size(parse_u64(tok, inst.line, what));
+        }
+        return encoded_uleb_size(resolve_index(tok, inst.line, what, *map));
+    };
+
     switch (op) {
-        case suru::vm::Op::Const:
-        case suru::vm::Op::GetLocal:
-        case suru::vm::Op::SetLocal:
-        case suru::vm::Op::GetGlobal:
-        case suru::vm::Op::SetGlobal:
+        case suru::vm::Op::Move:
+        case suru::vm::Op::Neg:
+        case suru::vm::Op::Not:
         case suru::vm::Op::GetUpvalue:
         case suru::vm::Op::SetUpvalue:
-        case suru::vm::Op::Return: {
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "opcode requires two operands");
+            }
+            return 1U + uleb(inst.args[0], "operand", nullptr)
+                + uleb(inst.args[1], "operand", nullptr);
+        case suru::vm::Op::LoadK:
+        case suru::vm::Op::GetGlobal:
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "opcode requires two operands");
+            }
+            return 1U + uleb(inst.args[0], "register", nullptr)
+                + uleb(inst.args[1], "index", &const_index);
+        case suru::vm::Op::SetGlobal:
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "opcode requires two operands");
+            }
+            return 1U + uleb(inst.args[0], "index", &const_index)
+                + uleb(inst.args[1], "register", nullptr);
+        case suru::vm::Op::Closure:
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "opcode requires two operands");
+            }
+            return 1U + uleb(inst.args[0], "register", nullptr)
+                + uleb(inst.args[1], "chunk", &chunk_index);
+        case suru::vm::Op::LoadNil:
+        case suru::vm::Op::LoadTrue:
+        case suru::vm::Op::LoadFalse:
+        case suru::vm::Op::NewTable:
             if (inst.args.size() != 1) {
                 throw AsmError(inst.line, "opcode requires one operand");
             }
-            const auto it = const_index.find(inst.args[0]);
-            if (it != const_index.end() && (op == suru::vm::Op::Const || op == suru::vm::Op::GetGlobal || op == suru::vm::Op::SetGlobal)) {
-                return 1U + encoded_uleb_size(it->second);
+            return 1U + uleb(inst.args[0], "operand", nullptr);
+        case suru::vm::Op::Add:
+        case suru::vm::Op::Sub:
+        case suru::vm::Op::Mul:
+        case suru::vm::Op::Div:
+        case suru::vm::Op::Idiv:
+        case suru::vm::Op::Mod:
+        case suru::vm::Op::Pow:
+        case suru::vm::Op::And:
+        case suru::vm::Op::Or:
+        case suru::vm::Op::Eq:
+        case suru::vm::Op::Ne:
+        case suru::vm::Op::Lt:
+        case suru::vm::Op::Le:
+        case suru::vm::Op::Gt:
+        case suru::vm::Op::Ge:
+        case suru::vm::Op::Band:
+        case suru::vm::Op::Bor:
+        case suru::vm::Op::Bxor:
+        case suru::vm::Op::Shl:
+        case suru::vm::Op::Shr:
+        case suru::vm::Op::GetTable:
+        case suru::vm::Op::SetTable:
+        case suru::vm::Op::Call:
+        case suru::vm::Op::Return:
+            if (inst.args.size() != 3 && op != suru::vm::Op::Return) {
+                throw AsmError(inst.line, "opcode requires three operands");
             }
-            return 1U + encoded_uleb_size(parse_u64(inst.args[0], inst.line, "integer"));
-        }
-        case suru::vm::Op::Call: {
-            if (inst.args.size() != 2) {
-                throw AsmError(inst.line, "CALL requires two operands");
+            if (inst.args.size() != 2 && op == suru::vm::Op::Return) {
+                throw AsmError(inst.line, "RETURN requires two operands");
             }
-            return 1U + encoded_uleb_size(parse_u64(inst.args[0], inst.line, "arg_count"))
-                + encoded_uleb_size(parse_u64(inst.args[1], inst.line, "ret_count"));
-        }
+            if (op == suru::vm::Op::Return) {
+                return 1U + uleb(inst.args[0], "operand", nullptr) + uleb(inst.args[1], "operand", nullptr);
+            }
+            return 1U + uleb(inst.args[0], "operand", nullptr)
+                + uleb(inst.args[1], "operand", nullptr)
+                + uleb(inst.args[2], "operand", nullptr);
         case suru::vm::Op::Jmp:
-        case suru::vm::Op::JmpIfFalse: {
             if (inst.args.size() != 1) {
-                throw AsmError(inst.line, "jump opcode requires one label operand");
+                throw AsmError(inst.line, "JMP requires one label");
             }
             return 1U + 5U;
-        }
-        case suru::vm::Op::Closure: {
-            if (inst.args.size() != 1) {
-                throw AsmError(inst.line, "CLOSURE requires one chunk operand");
+        case suru::vm::Op::JmpIfFalse:
+            if (inst.args.size() != 2) {
+                throw AsmError(inst.line, "JMPIF requires register and label");
             }
-            const auto it = chunk_index.find(inst.args[0]);
-            if (it == chunk_index.end()) {
-                throw AsmError(inst.line, "unknown chunk name: " + inst.args[0]);
-            }
-            return 1U + encoded_uleb_size(it->second);
-        }
+            return 1U + uleb(inst.args[0], "register", nullptr) + 5U;
         default:
-            if (!inst.args.empty()) {
-                throw AsmError(inst.line, "opcode does not take operands");
-            }
-            return 1U;
+            throw AsmError(inst.line, "unsupported opcode");
     }
 }
 
@@ -273,53 +330,99 @@ void emit_inst(
     const suru::vm::Op op = parse_op(inst.op, inst.line);
     out.push_back(static_cast<std::uint8_t>(op));
 
-    auto parse_operand_index = [&](std::string_view text) -> std::size_t {
-        const auto it = const_index.find(std::string(text));
-        if (it != const_index.end()) {
-            return it->second;
+    auto emit_u = [&](std::string_view tok, std::string_view what, const std::unordered_map<std::string, std::size_t>* map) {
+        std::size_t value = 0;
+        if (map == nullptr) {
+            value = static_cast<std::size_t>(parse_u64(tok, inst.line, what));
+        } else {
+            value = resolve_index(tok, inst.line, what, *map);
         }
-        return static_cast<std::size_t>(parse_u64(text, inst.line, "index"));
+        append_uleb(out, static_cast<std::uint64_t>(value));
     };
 
     switch (op) {
-        case suru::vm::Op::Const:
-        case suru::vm::Op::GetLocal:
-        case suru::vm::Op::SetLocal:
-        case suru::vm::Op::GetGlobal:
-        case suru::vm::Op::SetGlobal:
+        case suru::vm::Op::Move:
+        case suru::vm::Op::Neg:
+        case suru::vm::Op::Not:
         case suru::vm::Op::GetUpvalue:
         case suru::vm::Op::SetUpvalue:
-        case suru::vm::Op::Return: {
-            append_uleb(out, static_cast<std::uint64_t>(parse_operand_index(inst.args[0])));
+            emit_u(inst.args[0], "register", nullptr);
+            emit_u(inst.args[1], "register", nullptr);
             break;
-        }
-        case suru::vm::Op::Call: {
-            append_uleb(out, parse_u64(inst.args[0], inst.line, "arg_count"));
-            append_uleb(out, parse_u64(inst.args[1], inst.line, "ret_count"));
+        case suru::vm::Op::LoadK:
+        case suru::vm::Op::GetGlobal:
+            emit_u(inst.args[0], "register", nullptr);
+            emit_u(inst.args[1], "index", &const_index);
             break;
-        }
-        case suru::vm::Op::Jmp:
-        case suru::vm::Op::JmpIfFalse: {
+        case suru::vm::Op::SetGlobal:
+            emit_u(inst.args[0], "index", &const_index);
+            emit_u(inst.args[1], "register", nullptr);
+            break;
+        case suru::vm::Op::Closure:
+            emit_u(inst.args[0], "register", nullptr);
+            emit_u(inst.args[1], "chunk", &chunk_index);
+            break;
+        case suru::vm::Op::LoadNil:
+        case suru::vm::Op::LoadTrue:
+        case suru::vm::Op::LoadFalse:
+        case suru::vm::Op::NewTable:
+            emit_u(inst.args[0], "register", nullptr);
+            break;
+        case suru::vm::Op::Add:
+        case suru::vm::Op::Sub:
+        case suru::vm::Op::Mul:
+        case suru::vm::Op::Div:
+        case suru::vm::Op::Idiv:
+        case suru::vm::Op::Mod:
+        case suru::vm::Op::Pow:
+        case suru::vm::Op::And:
+        case suru::vm::Op::Or:
+        case suru::vm::Op::Eq:
+        case suru::vm::Op::Ne:
+        case suru::vm::Op::Lt:
+        case suru::vm::Op::Le:
+        case suru::vm::Op::Gt:
+        case suru::vm::Op::Ge:
+        case suru::vm::Op::Band:
+        case suru::vm::Op::Bor:
+        case suru::vm::Op::Bxor:
+        case suru::vm::Op::Shl:
+        case suru::vm::Op::Shr:
+        case suru::vm::Op::GetTable:
+        case suru::vm::Op::SetTable:
+        case suru::vm::Op::Call:
+            emit_u(inst.args[0], "register", nullptr);
+            emit_u(inst.args[1], "register", nullptr);
+            emit_u(inst.args[2], "register", nullptr);
+            break;
+        case suru::vm::Op::Return:
+            emit_u(inst.args[0], "register", nullptr);
+            emit_u(inst.args[1], "register", nullptr);
+            break;
+        case suru::vm::Op::Jmp: {
             const auto it = label_to_offset.find(inst.args[0]);
             if (it == label_to_offset.end()) {
                 throw AsmError(inst.line, "unknown label: " + inst.args[0]);
             }
             const std::int64_t after = static_cast<std::int64_t>(inst_offset + 1U + 5U);
             const std::int64_t target = static_cast<std::int64_t>(it->second);
-            const std::int64_t rel = target - after;
-            append_sleb32_fixed(out, static_cast<std::int32_t>(rel));
+            append_sleb32_fixed(out, static_cast<std::int32_t>(target - after));
             break;
         }
-        case suru::vm::Op::Closure: {
-            const auto it = chunk_index.find(inst.args[0]);
-            if (it == chunk_index.end()) {
-                throw AsmError(inst.line, "unknown chunk name: " + inst.args[0]);
+        case suru::vm::Op::JmpIfFalse: {
+            emit_u(inst.args[0], "register", nullptr);
+            const auto it = label_to_offset.find(inst.args[1]);
+            if (it == label_to_offset.end()) {
+                throw AsmError(inst.line, "unknown label: " + inst.args[1]);
             }
-            append_uleb(out, static_cast<std::uint64_t>(it->second));
+            const std::size_t operand_size = encoded_uleb_size(parse_u64(inst.args[0], inst.line, "register"));
+            const std::int64_t after = static_cast<std::int64_t>(inst_offset + 1U + operand_size + 5U);
+            const std::int64_t target = static_cast<std::int64_t>(it->second);
+            append_sleb32_fixed(out, static_cast<std::int32_t>(target - after));
             break;
         }
         default:
-            break;
+            throw AsmError(inst.line, "unsupported opcode");
     }
 }
 
@@ -342,17 +445,15 @@ void print_help(std::ostream& out) {
         << "  .const\n"
         << "    k0 = number 1\n"
         << "    k1 = string \"print\"\n"
-        << "  .chunk main 0 16 0\n"
-        << "    GET_GLOBAL k1\n"
-        << "    CLOSURE foo\n"
-        << "    GET_UPVALUE 0\n"
-        << "    SET_UPVALUE 0\n"
-        << "    CALL 0 1\n"
-        << "    CALL 1 0\n"
-        << "    RETURN 0\n"
-        << "  .chunk foo 0 8 0\n"
-        << "    CONST k0\n"
-        << "    RETURN 1\n";
+        << "  .chunk main 0 4 0\n"
+        << "    GETGLOBAL 0 k1\n"
+        << "    CLOSURE 1 foo\n"
+        << "    CALL 1 0 1\n"
+        << "    CALL 0 1 0\n"
+        << "    RETURN 0 0\n"
+        << "  .chunk foo 0 2 0\n"
+        << "    LOADK 0 k0\n"
+        << "    RETURN 0 1\n";
 }
 
 int run_file(const std::filesystem::path& path) {
@@ -422,7 +523,7 @@ int run_file(const std::filesystem::path& path) {
             const std::string name = trim(no_comment.substr(0, eq));
             const std::string rhs = trim(no_comment.substr(eq + 1));
             const auto parts = split_ws(rhs);
-            if (parts.size() < 1) {
+            if (parts.empty()) {
                 throw AsmError(line_no, "constant requires type");
             }
             if (const_index.contains(name)) {
@@ -521,7 +622,6 @@ int run_file(const std::filesystem::path& path) {
     cu->chunks_.reserve(chunk_defs.size());
 
     for (ChunkDef& chunk : chunk_defs) {
-        // First pass: compute label offsets.
         std::size_t local_offset = 0;
         std::unordered_map<std::string, std::size_t> label_offsets;
         for (const InstDef& inst : chunk.insts) {

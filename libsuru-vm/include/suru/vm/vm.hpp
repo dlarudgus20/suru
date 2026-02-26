@@ -47,6 +47,8 @@ private:
         std::size_t base {0};
         std::size_t code_end {0};
         std::size_t ret_slots {0};
+        std::size_t call_dst {0};
+        std::size_t call_retc {0};
     };
 
     template <typename T>
@@ -62,6 +64,12 @@ private:
     std::vector<CallFrame> i_stack_;
 
     void make_call_frame(std::size_t arg_count, std::size_t ret_slots);
+    void finish_frame_return(
+        std::size_t frame_base,
+        std::size_t expected,
+        std::size_t result_begin,
+        std::size_t result_end
+    );
     void run_c_frame();
     void run(std::size_t target_depth);
 };
