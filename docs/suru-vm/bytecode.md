@@ -1,16 +1,16 @@
 # Suru VM Bytecode
 
 ## 목적과 범위
-이 문서는 `libsuru-vm`의 현재 32비트 wordcode 형식을 정의한다.
-기준 구현:
+이 문서는 `libsuru-vm`의 현재 32비트 워드 기반 바이트코드 형식을 정의한다.
+기준 구현 파일:
 - `libsuru-vm/include/suru/vm/opcode.hpp`
 - `libsuru-vm/src/vm_exec.cpp`
 - `suru-bc/src/main.cpp`
 
 ## 기본 단위
-- 명령어는 항상 32비트 1워드다.
-- `CodeUnit::code_`는 `std::vector<uint32_t>`다.
-- `Chunk.code_begin/code_end`는 바이트 오프셋이 아니라 워드 인덱스 범위다.
+- 명령어는 항상 32비트 워드 1개다.
+- 바이트코드 본문은 `CodeUnit::code_` (`std::vector<uint32_t>`)에 저장된다.
+- `Chunk.code_begin` / `Chunk.code_end`는 워드 인덱스 범위를 뜻한다.
 
 ## 비트 포맷
 - 공통: `op`는 상위 6비트 (`bits 31..26`)
@@ -18,35 +18,55 @@
 - `ABx`: `op(6) | A(8) | Bx(18)`
 - `sAx`: `op(6) | sAx(26)` (2의 보수 signed)
 
-## 인자 범위
-- 레지스터 A: 8비트
-- 레지스터 B/C: 9비트
-- 인덱스 Bx: 18비트
-- 점프 sAx: signed 26비트, 단위는 워드(명령어 개수)
-
-## 호출 규약
+## 레지스터와 호출 규약
+- 레지스터는 현재 프레임의 `R[0..slots-1]` 범위를 사용한다.
 - `CALL F argc retc`
   - callee: `R[F]`
-  - args: `R[F+1] .. R[F+argc]`
+  - 인자: `R[F+1] .. R[F+argc]`
   - 결과 저장: `R[F] .. R[F+retc-1]`
-- 바이트코드 함수 인자 보정
-  - 부족한 인자는 `nil`로 채움
-  - 초과 인자는 무시
+- 바이트코드 함수는 `chunk.arity` 기준으로 인자를 받는다.
+  - 부족한 인자: `nil`로 채움
+  - 초과한 인자: 무시
 
-## 제어 흐름
-- `JMP rel`: 무조건 상대 점프
-- 조건 분기: `IF*` + `JMP` 조합
-  - `IF*`는 조건이 거짓이면 다음 1워드를 건너뜀
+## 업밸류 캡처 규약
+`Chunk`는 `upvalue_infos`를 가진다. 각 항목은 `{ source, index }`다.
+- `source = local`: 현재 프레임의 `R[index]`를 캡처
+- `source = upvalue`: 현재 클로저의 `upvalue[index]`를 재캡처
+
+`CLOSURE A chunk` 실행 시, 대상 chunk의 `upvalue_infos` 순서대로 업밸류가 채워진 클로저를 만들고 `R[A]`에 저장한다.
+
+## 어셈블리(.sura) 포맷
+- 섹션
+  - `.const`
+  - `.chunk <name> <arity> <slots>`
+- chunk 내부 지시어
+  - `.upvalue local <index>`
+  - `.upvalue upvalue <index>`
+- 라벨: `label:`
+- 주석: `;` 이후 텍스트
+- 엔트리 포인트: `main` chunk
 
 예시:
 ```sura
-LT 9 0 3
-IFFALSY 9
-JMP loop_end
+.const
+k1 = number 1
+
+.chunk main 0 2
+CLOSURE 0 inc
+CALL 0 0 1
+RETURN 0 1
+
+.chunk inc 0 2
+.upvalue local 1
+GETUPVAL 0 0
+LOADK 1 k1
+ADD 0 0 1
+SETUPVAL 0 0
+RETURN 0 1
 ```
 
-## Opcode 목록
-| Opcode | 포맷 | 인자 | 동작 |
+## Opcode 동작 요약
+| Opcode | Format | Args | 동작 |
 | --- | --- | --- | --- |
 | MOVE | ABx | `A B` | `R[A] = R[B]` |
 | LOADNIL / LOADTRUE / LOADFALSE | ABx | `A` | 상수 로드 |
@@ -61,37 +81,11 @@ JMP loop_end
 | NEWTABLE | ABx | `A` | `R[A] = {}` |
 | GETTABLE | ABC | `A B C` | `R[A] = R[B][R[C]]` |
 | SETTABLE | ABC | `A B C` | `R[A][R[B]] = R[C]` |
-| JMP | sAx | `rel` | 무조건 상대 점프 |
-| IFFALSY / IFTRUTHY | ABx | `A` | 조건 거짓 시 다음 1워드 스킵 |
-| IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `B C` | 비교 거짓 시 다음 1워드 스킵 |
+| JMP | sAx | `rel` | 상대 점프 |
+| IFFALSY / IFTRUTHY | ABx | `A` | 조건 거짓일 때 다음 1워드 스킵 |
+| IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `B C` | 비교 거짓일 때 다음 1워드 스킵 |
 | CALL | ABC | `F argc retc` | 함수 호출 |
-| RETURN | ABx | `A retc` | `R[A..]` 반환 |
-| CLOSURE | ABx | `A chunk` | `R[A]`에 closure 생성 |
+| RETURN | ABx | `A retc` | `R[A..A+retc-1]` 반환 |
+| CLOSURE | ABx | `A chunk` | 클로저 생성 및 저장 |
 | GETUPVAL | ABx | `A U` | `R[A] = upvalue[U]` |
 | SETUPVAL | ABx | `U A` | `upvalue[U] = R[A]` |
-
-## CLOSURE 캡처 규약
-`CLOSURE A chunk`에서 `chunk.upvalues = n`이면:
-- `upvalue[0] = R[A+1]`
-- ...
-- `upvalue[n-1] = R[A+n]`
-
-## 어셈블리 (`.sura`) 규칙
-- 섹션:
-  - `.const`
-  - `.chunk <name> <arity> <slots> <upvalues>`
-- 라벨: `name:`
-- 주석: `;` 이후 텍스트
-- 엔트리: `main` chunk
-- 각 chunk는 명시적 `RETURN`으로 끝나야 한다. 끝까지 도달하면 `unexpected end of chunk` 오류가 발생한다.
-
-## 주요 런타임 오류
-- `register index out of bounds`
-- `constant index out of bounds`
-- `global key must be string`
-- `call register index out of bounds`
-- `call argument range out of bounds`
-- `call return range out of bounds`
-- `upvalue index out of bounds`
-- `jump target out of bounds`
-- `unknown opcode`

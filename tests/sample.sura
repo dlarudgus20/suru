@@ -11,7 +11,7 @@ k_2 = number 2
 k_4 = number 4
 k_loop = number 120000
 
-.chunk main 0 8 0
+.chunk main 0 8
 GETGLOBAL 0 k_print
 LOADK 1 k_msg
 CALL 0 1 0
@@ -33,7 +33,7 @@ CALL 0 2 0
 
 RETURN 0 0
 
-.chunk work 0 10 0
+.chunk work 0 10
 LOADK 0 k_0
 LOADK 1 k_0
 LOADK 2 k_1

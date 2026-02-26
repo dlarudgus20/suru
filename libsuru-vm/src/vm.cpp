@@ -83,11 +83,20 @@ CodeUnit* VM::make_code_unit() {
     return code_units_.back().get();
 }
 
-Closure* VM::make_closure(CodeUnit* cu, std::uint32_t chunk_index, std::uint8_t n) {
+Closure* VM::make_closure(CodeUnit* cu, std::uint32_t chunk_index) {
+    if (cu == nullptr || chunk_index >= cu->chunks_.size()) {
+        throw InvalidImageError("closure chunk index out of bounds");
+    }
+    const Chunk& chunk = cu->chunks_[chunk_index];
+    const std::size_t n = chunk.upvalue_infos.size();
+    if (n > std::numeric_limits<std::uint8_t>::max()) {
+        throw InvalidImageError("too many upvalues");
+    }
+
     Closure* object = allocate_object<Closure>(n * sizeof(Upvalue*), alignof(Upvalue*));
     object->code = cu;
     object->chunk_index = chunk_index;
-    object->len = n;
+    object->len = static_cast<std::uint8_t>(n);
     for (std::size_t i = 0; i < n; ++i) {
         object->at(i) = nullptr;
     }

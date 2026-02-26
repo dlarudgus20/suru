@@ -1,0 +1,47 @@
+.const
+k_print = string "print"
+k_msg1 = string "first="
+k_msg2 = string "second="
+k_msg3 = string "third="
+k_40 = number 40
+k_100 = number 100
+k_1 = number 1
+
+.chunk main 0 8
+LOADK 2 k_40
+CLOSURE 0 make_inc
+CALL 0 0 1
+MOVE 3 0
+MOVE 0 3
+CALL 0 0 1
+GETGLOBAL 5 k_print
+LOADK 6 k_msg1
+MOVE 7 0
+CALL 5 2 0
+MOVE 0 3
+CALL 0 0 1
+GETGLOBAL 5 k_print
+LOADK 6 k_msg2
+MOVE 7 0
+CALL 5 2 0
+LOADK 2 k_100
+MOVE 0 3
+CALL 0 0 1
+GETGLOBAL 5 k_print
+LOADK 6 k_msg3
+MOVE 7 0
+CALL 5 2 0
+RETURN 0 0
+
+.chunk make_inc 0 3
+.upvalue local 2
+CLOSURE 0 inc
+RETURN 0 1
+
+.chunk inc 0 2
+.upvalue upvalue 0
+GETUPVAL 0 0
+LOADK 1 k_1
+ADD 0 0 1
+SETUPVAL 0 0
+RETURN 0 1

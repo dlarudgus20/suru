@@ -602,13 +602,29 @@ void VM::run(std::size_t target_depth) {
                     throw InvalidImageError("closure chunk index out of bounds");
                 }
                 const Chunk& chunk = cu->chunks_[chunk_index];
-                if (frame.base + a + chunk.upvalues >= frame_limit) {
-                    throw InvalidCodeError("upvalue capture register range out of bounds");
-                }
-                Closure* closure = make_closure(cu, chunk_index, chunk.upvalues);
-                for (std::uint8_t i = 0; i < chunk.upvalues; ++i) {
-                    const std::uint32_t abs_slot = frame.base + a + 1U + i;
-                    closure->at(i) = capture_upvalue(abs_slot);
+                Closure* closure = make_closure(cu, chunk_index);
+                for (std::uint8_t i = 0; i < closure->len; ++i) {
+                    const UpvalueInfo info = chunk.upvalue_infos[i];
+                    if (info.source == UpvalueSource::Local) {
+                        const std::uint32_t abs_slot = frame.base + info.index;
+                        if (abs_slot >= frame_limit) {
+                            throw InvalidCodeError("upvalue capture register range out of bounds");
+                        }
+                        closure->at(i) = capture_upvalue(abs_slot);
+                        continue;
+                    }
+                    if (info.source == UpvalueSource::Upvalue) {
+                        if (info.index >= current->len) {
+                            throw InvalidCodeError("upvalue capture index out of bounds");
+                        }
+                        Upvalue* captured = current->at(info.index);
+                        if (captured == nullptr) {
+                            throw InternalError("upvalue is not initialized");
+                        }
+                        closure->at(i) = captured;
+                        continue;
+                    }
+                    throw InvalidImageError("unknown upvalue source");
                 }
                 reg_write(a, Value::closure(closure));
                 break;

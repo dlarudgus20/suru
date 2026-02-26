@@ -29,7 +29,7 @@ public:
     [[nodiscard]] Closure* make_closure_c(CFunction func, std::uint8_t n);
 
     [[nodiscard]] CodeUnit* make_code_unit();
-    [[nodiscard]] Closure* make_closure(CodeUnit* cu, std::uint32_t chunk_index, std::uint8_t n);
+    [[nodiscard]] Closure* make_closure(CodeUnit* cu, std::uint32_t chunk_index);
 
     [[nodiscard]] Table* globals();
 

@@ -8,7 +8,7 @@ k_41 = number 41
 k_100 = number 100
 k_1 = number 1
 
-.chunk main 0 8 0
+.chunk main 0 8
 LOADK 1 k_41
 CLOSURE 0 inc
 GETGLOBAL 2 k_print
@@ -34,7 +34,8 @@ CALL 4 0 1
 CALL 2 2 0
 RETURN 0 0
 
-.chunk inc 0 2 1
+.chunk inc 0 2
+.upvalue local 1
 GETUPVAL 0 0
 LOADK 1 k_1
 ADD 0 0 1

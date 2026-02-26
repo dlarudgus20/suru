@@ -57,11 +57,17 @@ struct InstDef {
     int line {0};
 };
 
+struct UpvalueInfoDef {
+    suru::vm::UpvalueSource source {suru::vm::UpvalueSource::Local};
+    std::uint8_t index {0};
+    int line {0};
+};
+
 struct ChunkDef {
     std::string name;
     std::uint8_t arity {0};
     std::uint8_t slots {0};
-    std::uint8_t upvalues {0};
+    std::vector<UpvalueInfoDef> upvalue_infos;
     std::vector<InstDef> insts;
     std::unordered_set<std::string> label_names;
 };
@@ -424,13 +430,14 @@ void print_help(std::ostream& out) {
         << "  .const\n"
         << "    k0 = number 1\n"
         << "    k1 = string \"print\"\n"
-        << "  .chunk main 0 4 0\n"
+        << "  .chunk main 0 4\n"
         << "    GETGLOBAL 0 k1\n"
         << "    CLOSURE 1 foo\n"
         << "    CALL 1 0 1\n"
         << "    CALL 0 1 0\n"
         << "    RETURN 0 0\n"
-        << "  .chunk foo 0 2 0\n"
+        << "  .chunk foo 0 2\n"
+        << "    .upvalue local 0\n"
         << "    LOADK 0 k0\n"
         << "    RETURN 0 1\n";
 }
@@ -465,8 +472,8 @@ int run_file(const std::filesystem::path& path) {
 
         if (no_comment.starts_with(".chunk")) {
             const auto parts = split_ws(no_comment);
-            if (parts.size() != 5) {
-                throw AsmError(line_no, "expected: .chunk <name> <arity> <slots> <upvalues>");
+            if (parts.size() != 4) {
+                throw AsmError(line_no, "expected: .chunk <name> <arity> <slots>");
             }
             if (parts[1].empty()) {
                 throw AsmError(line_no, "chunk name cannot be empty");
@@ -480,7 +487,6 @@ int run_file(const std::filesystem::path& path) {
             chunk.name = parts[1];
             chunk.arity = checked_u8(parse_u64(parts[2], line_no, "arity"), line_no, "arity");
             chunk.slots = checked_u8(parse_u64(parts[3], line_no, "slots"), line_no, "slots");
-            chunk.upvalues = checked_u8(parse_u64(parts[4], line_no, "upvalues"), line_no, "upvalues");
             if (chunk.arity > chunk.slots) {
                 throw AsmError(line_no, "chunk arity must be <= slots");
             }
@@ -548,6 +554,25 @@ int run_file(const std::filesystem::path& path) {
                 throw AsmError(line_no, "internal parser error: null current chunk");
             }
 
+            if (no_comment.starts_with(".upvalue")) {
+                const auto parts = split_ws(no_comment);
+                if (parts.size() != 3) {
+                    throw AsmError(line_no, "expected: .upvalue <local|upvalue> <index>");
+                }
+                UpvalueInfoDef info;
+                if (parts[1] == "local") {
+                    info.source = suru::vm::UpvalueSource::Local;
+                } else if (parts[1] == "upvalue") {
+                    info.source = suru::vm::UpvalueSource::Upvalue;
+                } else {
+                    throw AsmError(line_no, "upvalue source must be local or upvalue");
+                }
+                info.index = checked_u8(parse_u64(parts[2], line_no, "upvalue index"), line_no, "upvalue index");
+                info.line = line_no;
+                current_chunk->upvalue_infos.push_back(info);
+                continue;
+            }
+
             if (no_comment.back() == ':') {
                 const std::string label = trim(no_comment.substr(0, no_comment.size() - 1));
                 if (label.empty()) {
@@ -601,6 +626,17 @@ int run_file(const std::filesystem::path& path) {
     cu->chunks_.reserve(chunk_defs.size());
 
     for (ChunkDef& chunk : chunk_defs) {
+        std::vector<suru::vm::UpvalueInfo> upvalue_infos;
+        upvalue_infos.reserve(chunk.upvalue_infos.size());
+        for (const UpvalueInfoDef& info : chunk.upvalue_infos) {
+            if (info.source == suru::vm::UpvalueSource::Local) {
+                if (info.index >= chunk.slots) {
+                    throw AsmError(info.line, "local upvalue index out of chunk slot range");
+                }
+            }
+            upvalue_infos.push_back(suru::vm::UpvalueInfo {info.source, info.index});
+        }
+
         std::uint32_t local_offset = 0;
         std::unordered_map<std::string, std::uint32_t> label_offsets;
         for (const InstDef& inst : chunk.insts) {
@@ -628,13 +664,12 @@ int run_file(const std::filesystem::path& path) {
             code_end,
             chunk.arity,
             chunk.slots,
-            chunk.upvalues,
+            std::move(upvalue_infos),
         });
     }
 
     const std::uint32_t main_index = chunk_index.at("main");
-    const std::uint8_t main_upvalues = cu->chunks_[main_index].upvalues;
-    suru::vm::Closure* entry = vm.make_closure(cu, main_index, main_upvalues);
+    suru::vm::Closure* entry = vm.make_closure(cu, main_index);
     vm.push_value(suru::vm::Value::closure(entry));
     vm.call(0, 0);
     return 0;

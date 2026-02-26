@@ -6,7 +6,7 @@ k_msg_r = string "r="
 k_7 = number 7
 k_3 = number 3
 
-.chunk main 0 8 0
+.chunk main 0 8
 GETGLOBAL 0 k_div
 LOADK 1 k_7
 LOADK 2 k_3
