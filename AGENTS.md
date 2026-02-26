@@ -17,6 +17,10 @@
 - `suru/`: CLI 실행 파일, REPL 및 파일 파싱 진입점
 - `docs/`: 언어/바이트코드 명세 문서
 
+## 작업 기억 문서
+- AI가 사용하는 작업 기억(최근 변경, 임시 결정, 후속 TODO)은 `docs/memory.md`에 기록한다.
+- `README`나 각 명세 문서에는 기억성 메모를 중복으로 남기지 않는다.
+
 ## 빌드/테스트/실행
 - 구성: `cmake -S . -B build`
 - 빌드(Debug): `cmake --build build --config Debug`
@@ -42,6 +46,11 @@
 - 이 항목은 Windows에서 작업할 때 적용한다. Windows가 아니라면 무시한다.
 - 작업 파일은 CRLF를 유지한다. 새로 만드는 파일도 전부 CRLF를 사용한다.
 - UTF-8 without BOM 인코딩을 사용하며 인코딩이 깨지지 않게 조심한다.
+- PowerShell에서 파일을 읽을 때 기본 인코딩을 쓰지 말고 UTF-8을 명시한다.
+  - 예: `Get-Content -Encoding UTF8 <path>`
+  - 또는 .NET API 사용: `[System.IO.File]::ReadAllText(path, [System.Text.UTF8Encoding]::new($false))`
+- 파일을 쓸 때도 UTF-8 without BOM을 명시한다.
+  - 예: `[System.IO.File]::WriteAllText(path, text, [System.Text.UTF8Encoding]::new($false))`
 
 ## Markdown 표 규칙
 - 표 헤더를 | 항목 |처럼 공백 포함 형태로 쓰면, 구분자도 반드시 | --- | 형태로 공백을 맞춘다.

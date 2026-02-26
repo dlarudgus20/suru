@@ -174,6 +174,8 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"POW", suru::vm::Op::Pow},
         {"NEG", suru::vm::Op::Neg},
         {"NOT", suru::vm::Op::Not},
+        {"AND", suru::vm::Op::And},
+        {"OR", suru::vm::Op::Or},
         {"EQ", suru::vm::Op::Eq},
         {"NE", suru::vm::Op::Ne},
         {"LT", suru::vm::Op::Lt},

@@ -10,12 +10,17 @@
   - CLI 실행 가능 여부를 확인한다.
 - `vm_smoke_test` (`libsuru-vm/tests/vm_smoke_test.cpp`)
   - 기본 바이트코드 실행 결과를 확인한다.
+- `suru_bc_upvalue_test` (`tests/upvalue.sura`)
+  - upvalue 캡처 및 `GET_UPVALUE`/`SET_UPVALUE` 실행 경로를 확인한다.
+- `suru_bc_div_test` (`tests/div.sura`)
+  - 표준 함수 `div(a, b)`의 다중 반환(몫/나머지) 처리를 확인한다.
 
 ## 실행 명령
 - 전체 테스트:
   - `ctest --test-dir build -C Debug --output-on-failure`
 - 특정 테스트:
   - `ctest --test-dir build -C Debug -R front_smoke_test --output-on-failure`
+  - `ctest --test-dir build -C Debug -R suru_bc_div_test --output-on-failure`
 
 ## 테스트 추가 원칙
 - 기능 변경 시 최소 1개 테스트를 같이 수정/추가한다.

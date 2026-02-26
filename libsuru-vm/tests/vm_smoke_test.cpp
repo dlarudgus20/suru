@@ -72,6 +72,7 @@ TEST(VmSmokeTest, LoadsStdModulesAndFunctions) {
     expect_global_closure("to_number");
     expect_global_closure("to_string");
     expect_global_closure("type");
+    expect_global_closure("div");
 
     expect_module_closure("str", "trim");
     expect_module_closure("str", "split");
@@ -247,6 +248,46 @@ TEST(VmSmokeTest, ExecutesBytecodeAndWritesGlobal) {
     EXPECT_TRUE(vm.globals()->get(suru::vm::Value::string(key_name), &out));
     EXPECT_EQ(out.kind, suru::vm::ValueKind::Number);
     EXPECT_EQ(out.number_, 42.0);
+}
+
+TEST(VmSmokeTest, EvaluatesBooleanAndOrOpcodes) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+
+    const std::size_t main_begin = cu->opcodes_.size();
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::True));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::False));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::And)); // false
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::True));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::False));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Or)); // true
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::True));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::True));
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::And)); // true
+    cu->opcodes_.push_back(static_cast<std::uint8_t>(suru::vm::Op::Return));
+    append_uleb(cu->opcodes_, 3);
+    const std::size_t main_end = cu->opcodes_.size();
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 4, 0});
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 3));
+
+    ASSERT_GE(vm.stack_top(), 3U);
+    const suru::vm::Value third = vm.pop_value();
+    const suru::vm::Value second = vm.pop_value();
+    const suru::vm::Value first = vm.pop_value();
+
+    ASSERT_EQ(first.kind, suru::vm::ValueKind::Boolean);
+    ASSERT_EQ(second.kind, suru::vm::ValueKind::Boolean);
+    ASSERT_EQ(third.kind, suru::vm::ValueKind::Boolean);
+    EXPECT_FALSE(first.bool_);
+    EXPECT_TRUE(second.bool_);
+    EXPECT_TRUE(third.bool_);
 }
 
 TEST(VmSmokeTest, CallsChunkClosureAndReturnsValue) {

@@ -5,5 +5,6 @@ target_compile_features(suru-bc PRIVATE cxx_std_23)
 
 if(BUILD_TESTING)
     add_test(NAME suru_bc_upvalue_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/upvalue.sura)
+    add_test(NAME suru_bc_div_test COMMAND suru-bc ${CMAKE_SOURCE_DIR}/tests/div.sura)
 endif()
 

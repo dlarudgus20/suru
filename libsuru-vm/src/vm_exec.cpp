@@ -22,6 +22,13 @@ double require_number(Value value, std::string_view where) {
     return value.number_;
 }
 
+bool require_boolean(Value value, std::string_view where) {
+    if (value.kind != ValueKind::Boolean) {
+        throw std::runtime_error(std::string(where) + ": expected boolean");
+    }
+    return value.bool_;
+}
+
 Table* require_table(Value value, std::string_view where) {
     if (value.kind != ValueKind::Table || value.table_ == nullptr) {
         throw std::runtime_error(std::string(where) + ": expected table");
@@ -313,6 +320,13 @@ void VM::run(std::size_t target_depth) {
             }
             case Op::Not: {
                 v_stack_.push_back(Value::boolean(is_falsey(pop_value())));
+                break;
+            }
+            case Op::And:
+            case Op::Or: {
+                const bool rhs = require_boolean(pop_value(), "logical op");
+                const bool lhs = require_boolean(pop_value(), "logical op");
+                v_stack_.push_back(Value::boolean(op == Op::And ? (lhs && rhs) : (lhs || rhs)));
                 break;
             }
             case Op::Eq:

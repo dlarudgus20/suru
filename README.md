@@ -22,3 +22,10 @@ ctest --test-dir build --output-on-failure
 # 파일 파싱
 ./build/suru/suru <file.suru>
 ```
+
+## 빠른 실행 예시
+```bash
+./build/suru-bc/Debug/suru-bc.exe tests/div.sura
+./build/suru-bc/Debug/suru-bc.exe tests/upvalue.sura
+ctest --test-dir build -C Debug --output-on-failure
+```

@@ -58,6 +58,8 @@
 | POW | `0x16` | - | 0 | pop 2, push 1 | `pow(lhs, rhs)` |
 | NEG | `0x17` | - | 0 | pop 1, push 1 | 단항 음수 |
 | NOT | `0x18` | - | 0 | pop 1, push 1 | falsey 부정 |
+| AND | `0x19` | - | 0 | pop 2, push 1 | bool 논리곱 |
+| OR | `0x1A` | - | 0 | pop 2, push 1 | bool 논리합 |
 | EQ | `0x20` | - | 0 | pop 2, push 1 | 동등 비교 |
 | NE | `0x21` | - | 0 | pop 2, push 1 | 비동등 비교 |
 | LT | `0x22` | - | 0 | pop 2, push 1 | `<` |
@@ -92,6 +94,11 @@
 - 테이블 연산:
   - `GET_TABLE`: `key`, `table` 순 pop
   - `SET_TABLE`: `value`, `key`, `table` 순 pop
+
+### 논리 연산
+- `AND`, `OR`는 bool 전용 연산이다.
+- 두 피연산자를 pop한 뒤 bool 결과를 push한다.
+- 피연산자가 bool이 아니면 `logical op: expected boolean` 예외가 발생한다.
 
 ### JMP / JMP_IF_FALSE
 - 인자: 상대 오프셋 `rel` (SLEB)
@@ -132,6 +139,7 @@
 - 인자 전달: 스택 기반
 - 결과 전달: caller `ret_slots` 기준
 - C 함수 내부에서도 `vm.call(...)` 재진입 가능
+- C 함수 시그니처: `void (*)(VM* vm)` (단일 인자)
 
 ## 어셈블리 (`.sura`) 규칙
 - 구조:

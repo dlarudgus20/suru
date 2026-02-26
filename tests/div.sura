@@ -1,0 +1,23 @@
+.const
+k_print = string "print"
+k_div = string "div"
+k_q = string "q"
+k_r = string "r"
+k_msg = string "div(7,3):"
+k_n7 = number 7
+k_n3 = number 3
+
+.chunk main 0 2 0
+GET_GLOBAL k_div
+CONST k_n7
+CONST k_n3
+CALL 2 2
+SET_GLOBAL k_r
+SET_GLOBAL k_q
+
+GET_GLOBAL k_print
+CONST k_msg
+GET_GLOBAL k_q
+GET_GLOBAL k_r
+CALL 3 0
+RETURN 0

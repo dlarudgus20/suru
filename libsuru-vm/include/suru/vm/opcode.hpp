@@ -26,6 +26,8 @@ enum class Op : std::uint8_t {
     Pow = 0x16,
     Neg = 0x17,
     Not = 0x18,
+    And = 0x19,
+    Or = 0x1A,
 
     Eq = 0x20,
     Ne = 0x21,

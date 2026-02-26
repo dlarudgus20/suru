@@ -149,6 +149,27 @@ void std_type(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
     vm->push_value(suru::vm::Value::string(vm->make_string(name)));
 }
 
+void std_div(suru::vm::VM* vm) {
+    if (vm->stack_top() < 2U) {
+        vm->push_value(std_nil());
+        vm->push_value(std_nil());
+        return;
+    }
+
+    const suru::vm::Value lhs = vm->getlocal(0);
+    const suru::vm::Value rhs = vm->getlocal(1);
+    if (lhs.kind != suru::vm::ValueKind::Number || rhs.kind != suru::vm::ValueKind::Number || rhs.number_ == 0.0) {
+        vm->push_value(std_nil());
+        vm->push_value(std_nil());
+        return;
+    }
+
+    const double quotient = std::floor(lhs.number_ / rhs.number_);
+    const double remainder = std::fmod(lhs.number_, rhs.number_);
+    vm->push_value(suru::vm::Value::number(quotient));
+    vm->push_value(suru::vm::Value::number(remainder));
+}
+
 void std_measure(suru::vm::VM* vm) {    if (vm->stack_top() < 1U) {
         vm->push_value(std_nil());
         return;
@@ -381,6 +402,7 @@ void load_libs(suru::vm::VM& vm) {
     register_cfunc(vm, "to_number", &std_to_number);
     register_cfunc(vm, "to_string", &std_to_string);
     register_cfunc(vm, "type", &std_type);
+    register_cfunc(vm, "div", &std_div);
     register_cfunc(vm, "measure", &std_measure);
 
     register_module_func(vm, "str", "trim", &str_trim);
