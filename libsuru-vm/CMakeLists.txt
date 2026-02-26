@@ -1,4 +1,5 @@
 add_library(libsuru-vm STATIC
+    src/lib.cpp
     src/object.cpp
     src/vm.cpp
     src/vm_exec.cpp

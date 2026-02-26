@@ -1,0 +1,138 @@
+.const
+k_print = string "print"
+k_to_number = string "to_number"
+k_type = string "type"
+k_str = string "str"
+k_table = string "table"
+k_math = string "math"
+k_trim = string "trim"
+k_split = string "split"
+k_push = string "push"
+k_pop = string "pop"
+k_keys = string "keys"
+k_abs = string "abs"
+k_banner = string "== suru-bc sample =="
+k_num_text = string "123.5"
+k_spaces = string "  alpha,beta,,gamma  "
+k_comma = string ","
+k_extra = string "delta"
+k_msg_num = string "num:"
+k_msg_trim = string "trimmed:"
+k_msg_pop = string "popped:"
+k_msg_keys = string "keys type:"
+k_msg_add = string "add2(40,2):"
+k_msg_abs = string "abs(-7):"
+k_n40 = number 40
+k_n2 = number 2
+k_n7n = number -7
+
+.chunk main 8 0
+; print("== suru-bc sample ==")
+GET_GLOBAL k_print
+CONST k_banner
+CALL 1 0
+
+; num = to_number("123.5")
+GET_GLOBAL k_to_number
+CONST k_num_text
+CALL 1 1
+SET_LOCAL 0
+
+; print("num:", num, type(num))
+GET_GLOBAL k_print
+CONST k_msg_num
+GET_LOCAL 0
+GET_GLOBAL k_type
+GET_LOCAL 0
+CALL 1 1
+CALL 3 0
+
+; trimmed = str.trim("  alpha,beta,,gamma  ")
+GET_GLOBAL k_str
+CONST k_trim
+GET_TABLE
+CONST k_spaces
+CALL 1 1
+SET_LOCAL 1
+
+; parts = str.split(trimmed, ",", true)
+GET_GLOBAL k_str
+CONST k_split
+GET_TABLE
+GET_LOCAL 1
+CONST k_comma
+TRUE
+CALL 3 1
+SET_LOCAL 2
+
+; table.push(parts, "delta")
+GET_GLOBAL k_table
+CONST k_push
+GET_TABLE
+GET_LOCAL 2
+CONST k_extra
+CALL 2 1
+POP
+
+; popped = table.pop(parts)
+GET_GLOBAL k_table
+CONST k_pop
+GET_TABLE
+GET_LOCAL 2
+CALL 1 1
+SET_LOCAL 3
+
+; keys = table.keys(parts)
+GET_GLOBAL k_table
+CONST k_keys
+GET_TABLE
+GET_LOCAL 2
+CALL 1 1
+SET_LOCAL 4
+
+; print("trimmed:", trimmed)
+GET_GLOBAL k_print
+CONST k_msg_trim
+GET_LOCAL 1
+CALL 2 0
+
+; print("popped:", popped)
+GET_GLOBAL k_print
+CONST k_msg_pop
+GET_LOCAL 3
+CALL 2 0
+
+; print("keys type:", type(keys))
+GET_GLOBAL k_print
+CONST k_msg_keys
+GET_GLOBAL k_type
+GET_LOCAL 4
+CALL 1 1
+CALL 2 0
+
+; print("add2(40,2):", add2(40, 2))
+GET_GLOBAL k_print
+CONST k_msg_add
+CLOSURE add2
+CONST k_n40
+CONST k_n2
+CALL 2 1
+CALL 2 0
+
+; print("abs(-7):", math.abs(-7))
+GET_GLOBAL k_print
+CONST k_msg_abs
+GET_GLOBAL k_math
+CONST k_abs
+GET_TABLE
+CONST k_n7n
+CALL 1 1
+CALL 2 0
+
+RETURN 0
+
+.chunk add2 2 0
+GET_LOCAL 0
+GET_LOCAL 1
+ADD
+RETURN 1

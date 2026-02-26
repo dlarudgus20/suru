@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <vector>
 
 #include "suru/vm/value.hpp"
 #include "suru/vm/object.hpp"
@@ -34,7 +34,21 @@ public:
     Table* globals();
     const Table* globals() const;
 
+    [[nodiscard]] Value pop_value();
+    void push_value(Value value);
+
+    [[nodiscard]] std::size_t c_arg_count() const;
+    [[nodiscard]] Value c_arg(std::size_t index) const;
+
 private:
+    struct CallFrame {
+        Closure* closure {nullptr};
+        std::size_t pc {0};
+        std::size_t base {0};
+        std::size_t code_end {0};
+        std::size_t expected_results {0};
+    };
+
     template <typename T>
     T* allocate_object(size_t size, size_t align);
 
@@ -45,7 +59,11 @@ private:
     std::vector<std::unique_ptr<CodeUnit>> code_units_;
 
     std::vector<Value> v_stack_;
-    std::vector<std::pair<Closure*, size_t>> i_stack_;
+    std::vector<CallFrame> i_stack_;
+
+    bool c_call_active_ {false};
+    std::size_t c_arg_base_ {0};
+    std::size_t c_arg_count_ {0};
 };
 
 } // namespace suru::vm

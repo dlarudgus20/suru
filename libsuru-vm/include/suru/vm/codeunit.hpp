@@ -1,25 +1,27 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
-#include <string_view>
-#include <unordered_set>
-#include <span>
+#include <vector>
 
 #include "suru/vm/value.hpp"
-#include "suru/vm/object.hpp"
 
 namespace suru::vm {
 
-class CodeUnit;
-
 struct Chunk {
-    std::span<char> opcodes_;
+    std::string name;
+    std::size_t code_begin {0};
+    std::size_t code_end {0};
+    std::size_t max_slots {0};
+    std::size_t upvalue_count {0};
 };
 
 struct CodeUnit {
-    std::vector<char> opcodes_;
+    std::vector<std::uint8_t> opcodes_;
     std::vector<Value> constants_;
     std::vector<Chunk> chunks_;
 };
 
 } // namespace suru::vm
+
