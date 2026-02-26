@@ -44,7 +44,8 @@ LOADK 6 k_4
 
 loop_begin:
 LT 9 0 3
-JMPIF 9 loop_end
+IFFALSEY 9
+JMP loop_end
 MUL 7 0 4
 ADD 7 7 5
 DIV 8 2 7

@@ -13,6 +13,16 @@
 namespace suru::vm {
 namespace {
 
+constexpr std::uint32_t kOpShift = 26U;
+constexpr std::uint32_t kOpMask = 0x3FU;
+constexpr std::uint32_t kAShift = 18U;
+constexpr std::uint32_t kAMask = 0xFFU;
+constexpr std::uint32_t kBShift = 9U;
+constexpr std::uint32_t kBMask = 0x1FFU;
+constexpr std::uint32_t kCMask = 0x1FFU;
+constexpr std::uint32_t kBxMask = 0x3FFFFU;
+constexpr std::uint32_t kAxMask = 0x3FFFFFFU;
+
 bool is_falsey(Value value) {
     return value.kind == ValueKind::Nil || (value.kind == ValueKind::Boolean && !value.bool_);
 }
@@ -57,52 +67,42 @@ std::uint32_t to_u32(std::size_t value, std::string_view where) {
     return static_cast<std::uint32_t>(value);
 }
 
-std::uint64_t read_u_raw(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
-    std::uint64_t value = 0;
-    int shift = 0;
-    while (true) {
-        if (pc >= code_end || static_cast<std::size_t>(pc) >= cu.opcodes_.size()) {
-            throw std::runtime_error("truncated integer operand");
-        }
-        const std::uint8_t byte = cu.opcodes_[pc++];
-        value |= static_cast<std::uint64_t>(byte & 0x7fU) << shift;
-        if ((byte & 0x80U) == 0U) {
-            return value;
-        }
-        shift += 7;
-        if (shift > 63) {
-            throw std::runtime_error("integer operand overflow");
-        }
-    }
-}
-
-std::uint8_t read_u8(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
-    const std::uint64_t value = read_u_raw(cu, code_end, pc);
+std::uint8_t to_u8(std::uint32_t value, std::string_view where) {
     if (value > std::numeric_limits<std::uint8_t>::max()) {
-        throw std::runtime_error("integer operand exceeds uint8 range");
+        throw std::runtime_error(std::string(where) + ": exceeds uint8 range");
     }
     return static_cast<std::uint8_t>(value);
 }
 
-std::uint32_t read_u32(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
-    const std::uint64_t value = read_u_raw(cu, code_end, pc);
-    if (value > std::numeric_limits<std::uint32_t>::max()) {
-        throw std::runtime_error("integer operand exceeds uint32 range");
-    }
-    return static_cast<std::uint32_t>(value);
+Op decode_op(std::uint32_t word) {
+    return static_cast<Op>((word >> kOpShift) & kOpMask);
 }
 
-std::int16_t read_i16(const CodeUnit& cu, std::uint32_t code_end, std::uint32_t& pc) {
-    if (pc + 1U >= code_end || static_cast<std::size_t>(pc + 1U) >= cu.opcodes_.size()) {
-        throw std::runtime_error("truncated int16");
-    }
-    const std::uint16_t lo = cu.opcodes_[pc];
-    const std::uint16_t hi = cu.opcodes_[pc + 1U];
-    pc += 2U;
-    return static_cast<std::int16_t>((hi << 8U) | lo);
+std::uint32_t decode_a(std::uint32_t word) {
+    return (word >> kAShift) & kAMask;
 }
 
-Value reg_read(std::uint32_t base, std::uint32_t limit, const std::vector<Value>& stack, std::uint8_t index) {
+std::uint32_t decode_b(std::uint32_t word) {
+    return (word >> kBShift) & kBMask;
+}
+
+std::uint32_t decode_c(std::uint32_t word) {
+    return word & kCMask;
+}
+
+std::uint32_t decode_bx(std::uint32_t word) {
+    return word & kBxMask;
+}
+
+std::int32_t decode_sax(std::uint32_t word) {
+    const std::uint32_t raw = word & kAxMask;
+    if ((raw & (1U << 25U)) == 0U) {
+        return static_cast<std::int32_t>(raw);
+    }
+    return static_cast<std::int32_t>(raw | (~kAxMask));
+}
+
+Value reg_read(std::uint32_t base, std::uint32_t limit, const std::vector<Value>& stack, std::uint32_t index) {
     const std::uint32_t at32 = base + index;
     if (at32 >= limit) {
         throw std::runtime_error("register index out of bounds");
@@ -114,7 +114,7 @@ Value reg_read(std::uint32_t base, std::uint32_t limit, const std::vector<Value>
     return stack[at];
 }
 
-void reg_write(std::uint32_t base, std::uint32_t limit, std::vector<Value>& stack, std::uint8_t index, Value value) {
+void reg_write(std::uint32_t base, std::uint32_t limit, std::vector<Value>& stack, std::uint32_t index, Value value) {
     const std::uint32_t at32 = base + index;
     if (at32 >= limit) {
         throw std::runtime_error("register index out of bounds");
@@ -124,6 +124,13 @@ void reg_write(std::uint32_t base, std::uint32_t limit, std::vector<Value>& stac
         throw std::runtime_error("register write out of stack bounds");
     }
     stack[at] = value;
+}
+
+void skip_next_word(std::uint32_t& pc, std::uint32_t code_end) {
+    if (pc >= code_end) {
+        throw std::runtime_error("skip target out of bounds");
+    }
+    ++pc;
 }
 
 } // namespace
@@ -154,10 +161,10 @@ void VM::finish_frame_return(
             throw std::runtime_error("call return range out of bounds");
         }
         for (std::uint8_t i = 0; i < emit; ++i) {
-            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint8_t>(caller.call_dst + i), v_stack_[result_begin + i]);
+            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint32_t>(caller.call_dst + i), v_stack_[result_begin + i]);
         }
         for (std::uint8_t i = emit; i < expected; ++i) {
-            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint8_t>(caller.call_dst + i), Value::nil());
+            reg_write(caller.base, caller_limit, v_stack_, static_cast<std::uint32_t>(caller.call_dst + i), Value::nil());
         }
         v_stack_.resize(frame_base);
         caller.call_dst = 0;
@@ -274,36 +281,35 @@ void VM::run(std::size_t target_depth) {
         if (frame.pc >= frame.code_end) {
             throw std::runtime_error("unexpected end of chunk");
         }
-        if (static_cast<std::size_t>(frame.pc) >= cu->opcodes_.size()) {
+        if (static_cast<std::size_t>(frame.pc) >= cu->code_.size()) {
             throw std::runtime_error("program counter out of bytecode bounds");
         }
 
-        const Op op = static_cast<Op>(cu->opcodes_[frame.pc++]);
+        const std::uint32_t word = cu->code_[frame.pc++];
+        const Op op = decode_op(word);
+
         switch (op) {
             case Op::Move: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t b = decode_bx(word);
                 reg_write(frame.base, frame_limit, v_stack_, a, reg_read(frame.base, frame_limit, v_stack_, b));
                 break;
             }
             case Op::LoadNil: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                reg_write(frame.base, frame_limit, v_stack_, a, Value::nil());
+                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::nil());
                 break;
             }
             case Op::LoadTrue: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(true));
+                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::boolean(true));
                 break;
             }
             case Op::LoadFalse: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                reg_write(frame.base, frame_limit, v_stack_, a, Value::boolean(false));
+                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::boolean(false));
                 break;
             }
             case Op::LoadK: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint32_t k = read_u32(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t k = decode_bx(word);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("constant index out of bounds");
                 }
@@ -311,8 +317,8 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::GetGlobal: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint32_t k = read_u32(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t k = decode_bx(word);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
@@ -328,8 +334,8 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::SetGlobal: {
-                const std::uint32_t k = read_u32(*cu, frame.code_end, frame.pc);
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t k = decode_bx(word);
                 if (k >= cu->constants_.size()) {
                     throw std::runtime_error("global key constant index out of bounds");
                 }
@@ -337,8 +343,7 @@ void VM::run(std::size_t target_depth) {
                 if (key.kind != ValueKind::String) {
                     throw std::runtime_error("global key must be string");
                 }
-                const Value value = reg_read(frame.base, frame_limit, v_stack_, a);
-                if (!globals()->set(key, value)) {
+                if (!globals()->set(key, reg_read(frame.base, frame_limit, v_stack_, a))) {
                     throw std::runtime_error("failed to set global value");
                 }
                 break;
@@ -363,9 +368,9 @@ void VM::run(std::size_t target_depth) {
             case Op::Ge:
             case Op::And:
             case Op::Or: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t c = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t b = decode_b(word);
+                const std::uint32_t c = decode_c(word);
                 const Value lhs_v = reg_read(frame.base, frame_limit, v_stack_, b);
                 const Value rhs_v = reg_read(frame.base, frame_limit, v_stack_, c);
 
@@ -428,8 +433,8 @@ void VM::run(std::size_t target_depth) {
             }
             case Op::Neg:
             case Op::Not: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t b = decode_bx(word);
                 const Value input = reg_read(frame.base, frame_limit, v_stack_, b);
                 if (op == Op::Neg) {
                     reg_write(frame.base, frame_limit, v_stack_, a, Value::number(-require_number(input, "neg")));
@@ -439,14 +444,13 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::NewTable: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                reg_write(frame.base, frame_limit, v_stack_, a, Value::table(make_table()));
+                reg_write(frame.base, frame_limit, v_stack_, decode_a(word), Value::table(make_table()));
                 break;
             }
             case Op::GetTable: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t c = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t b = decode_b(word);
+                const std::uint32_t c = decode_c(word);
                 Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, b), "gettable");
                 const Value key = reg_read(frame.base, frame_limit, v_stack_, c);
                 Value out = Value::nil();
@@ -457,9 +461,9 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::SetTable: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t b = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t c = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t b = decode_b(word);
+                const std::uint32_t c = decode_c(word);
                 Table* table = require_table(reg_read(frame.base, frame_limit, v_stack_, a), "settable");
                 if (!table->set(reg_read(frame.base, frame_limit, v_stack_, b), reg_read(frame.base, frame_limit, v_stack_, c))) {
                     throw std::runtime_error("failed to set table key");
@@ -467,54 +471,91 @@ void VM::run(std::size_t target_depth) {
                 break;
             }
             case Op::Jmp: {
-                const std::int16_t rel = read_i16(*cu, frame.code_end, frame.pc);
-                const std::int64_t next = static_cast<std::int64_t>(frame.pc) + rel;
+                const std::int64_t next = static_cast<std::int64_t>(frame.pc) + decode_sax(word);
                 if (next < 0 || static_cast<std::uint64_t>(next) > frame.code_end) {
                     throw std::runtime_error("jump target out of bounds");
                 }
                 frame.pc = static_cast<std::uint32_t>(next);
                 break;
             }
-            case Op::JmpIfFalse: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::int16_t rel = read_i16(*cu, frame.code_end, frame.pc);
-                const Value cond = reg_read(frame.base, frame_limit, v_stack_, a);
-                if (is_falsey(cond)) {
-                    const std::int64_t next = static_cast<std::int64_t>(frame.pc) + rel;
-                    if (next < 0 || static_cast<std::uint64_t>(next) > frame.code_end) {
-                        throw std::runtime_error("jump target out of bounds");
+            case Op::IfFalsey: {
+                const Value v = reg_read(frame.base, frame_limit, v_stack_, decode_a(word));
+                if (!is_falsey(v)) {
+                    skip_next_word(frame.pc, frame.code_end);
+                }
+                break;
+            }
+            case Op::IfTruthy: {
+                const Value v = reg_read(frame.base, frame_limit, v_stack_, decode_a(word));
+                if (is_falsey(v)) {
+                    skip_next_word(frame.pc, frame.code_end);
+                }
+                break;
+            }
+            case Op::IfEq:
+            case Op::IfNe:
+            case Op::IfLt:
+            case Op::IfLe:
+            case Op::IfGt:
+            case Op::IfGe: {
+                const std::uint32_t b = decode_b(word);
+                const std::uint32_t c = decode_c(word);
+                const Value lhs_v = reg_read(frame.base, frame_limit, v_stack_, b);
+                const Value rhs_v = reg_read(frame.base, frame_limit, v_stack_, c);
+                bool cond = false;
+                if (op == Op::IfEq || op == Op::IfNe) {
+                    const bool eq = value_equals(lhs_v, rhs_v);
+                    cond = (op == Op::IfEq) ? eq : !eq;
+                } else {
+                    const double lhs = require_number(lhs_v, "skip compare");
+                    const double rhs = require_number(rhs_v, "skip compare");
+                    switch (op) {
+                        case Op::IfLt: cond = lhs < rhs; break;
+                        case Op::IfLe: cond = lhs <= rhs; break;
+                        case Op::IfGt: cond = lhs > rhs; break;
+                        case Op::IfGe: cond = lhs >= rhs; break;
+                        default: break;
                     }
-                    frame.pc = static_cast<std::uint32_t>(next);
+                }
+                if (!cond) {
+                    skip_next_word(frame.pc, frame.code_end);
                 }
                 break;
             }
             case Op::Call: {
-                const std::uint8_t f = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t arg_count = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t ret_count = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t f = decode_a(word);
+                const std::uint32_t arg_count = decode_b(word);
+                const std::uint32_t ret_count = decode_c(word);
+                if (arg_count > std::numeric_limits<std::uint8_t>::max()) {
+                    throw std::runtime_error("call argument count exceeds uint8 range");
+                }
+                if (ret_count > std::numeric_limits<std::uint8_t>::max()) {
+                    throw std::runtime_error("call return count exceeds uint8 range");
+                }
+
                 const std::uint32_t avail = frame_limit - frame.base;
                 if (f >= avail) {
                     throw std::runtime_error("call register index out of bounds");
                 }
-                if (static_cast<std::uint32_t>(f) + 1U + arg_count > avail) {
+                if (f + 1U + arg_count > avail) {
                     throw std::runtime_error("call argument range out of bounds");
                 }
-                if (static_cast<std::uint32_t>(f) + ret_count > avail) {
+                if (f + ret_count > avail) {
                     throw std::runtime_error("call return range out of bounds");
                 }
 
-                frame.call_dst = f;
-                frame.call_retc = ret_count;
+                frame.call_dst = to_u8(f, "call destination register");
+                frame.call_retc = to_u8(ret_count, "call return count");
                 v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f));
-                for (std::uint8_t i = 0; i < arg_count; ++i) {
-                    v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, static_cast<std::uint8_t>(f + 1U + i)));
+                for (std::uint32_t i = 0; i < arg_count; ++i) {
+                    v_stack_.push_back(reg_read(frame.base, frame_limit, v_stack_, f + 1U + i));
                 }
-                make_call_frame(arg_count, ret_count);
+                make_call_frame(static_cast<std::uint8_t>(arg_count), static_cast<std::uint8_t>(ret_count));
                 break;
             }
             case Op::Closure: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint32_t chunk_index = read_u32(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t chunk_index = decode_bx(word);
                 if (chunk_index >= cu->chunks_.size()) {
                     throw std::runtime_error("closure chunk index out of bounds");
                 }
@@ -524,32 +565,35 @@ void VM::run(std::size_t target_depth) {
                 }
                 Closure* closure = make_closure(cu, chunk_index, chunk.upvalues);
                 for (std::uint8_t i = 0; i < chunk.upvalues; ++i) {
-                    closure->at(i) = reg_read(frame.base, frame_limit, v_stack_, static_cast<std::uint8_t>(a + 1U + i));
+                    closure->at(i) = reg_read(frame.base, frame_limit, v_stack_, a + 1U + i);
                 }
                 reg_write(frame.base, frame_limit, v_stack_, a, Value::closure(closure));
                 break;
             }
             case Op::GetUpvalue: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t idx = read_u8(*cu, frame.code_end, frame.pc);
-                if (idx >= current->len) {
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t idx = decode_bx(word);
+                if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
-                reg_write(frame.base, frame_limit, v_stack_, a, current->at(idx));
+                reg_write(frame.base, frame_limit, v_stack_, a, current->at(static_cast<std::uint8_t>(idx)));
                 break;
             }
             case Op::SetUpvalue: {
-                const std::uint8_t idx = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                if (idx >= current->len) {
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t idx = decode_bx(word);
+                if (idx > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(idx) >= current->len) {
                     throw std::runtime_error("upvalue index out of bounds");
                 }
-                current->at(idx) = reg_read(frame.base, frame_limit, v_stack_, a);
+                current->at(static_cast<std::uint8_t>(idx)) = reg_read(frame.base, frame_limit, v_stack_, a);
                 break;
             }
             case Op::Return: {
-                const std::uint8_t a = read_u8(*cu, frame.code_end, frame.pc);
-                const std::uint8_t ret_count = read_u8(*cu, frame.code_end, frame.pc);
+                const std::uint32_t a = decode_a(word);
+                const std::uint32_t ret_count = decode_bx(word);
+                if (ret_count > std::numeric_limits<std::uint8_t>::max()) {
+                    throw std::runtime_error("return count exceeds uint8 range");
+                }
                 if (frame.base + a + ret_count > frame_limit) {
                     throw std::runtime_error("return register range out of bounds");
                 }

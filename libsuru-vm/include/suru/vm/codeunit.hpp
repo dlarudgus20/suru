@@ -19,7 +19,7 @@ struct Chunk {
 };
 
 struct CodeUnit {
-    std::vector<std::uint8_t> opcodes_;
+    std::vector<std::uint32_t> code_;
     std::vector<Value> constants_;
     std::vector<Chunk> chunks_;
 };

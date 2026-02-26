@@ -1,63 +1,74 @@
 # Suru VM Bytecode
 
 ## 목적과 범위
-이 문서는 `libsuru-vm`의 현재 register-based 바이트코드 형식을 정의한다.
+이 문서는 `libsuru-vm`의 현재 32비트 wordcode 형식을 정의한다.
 기준 구현:
 - `libsuru-vm/include/suru/vm/opcode.hpp`
 - `libsuru-vm/src/vm_exec.cpp`
 - `suru-bc/src/main.cpp`
 
-## 인코딩 규칙
-- Opcode: 1바이트 (`u8`)
-- 정수 인자: 가변 길이 부호 없는 정수 인코딩
-- 점프 오프셋: `i16` (2바이트)
-- 멀티바이트 정수 바이트 순서는 리틀엔디안으로 통일한다.
+## 기본 단위
+- 명령어는 항상 32비트 1워드다.
+- `CodeUnit::code_`는 `std::vector<uint32_t>`다.
+- `Chunk.code_begin/code_end`는 바이트 오프셋이 아니라 워드 인덱스 범위다.
 
-## CodeUnit / Chunk
-`.chunk <name> <arity> <slots> <upvalues>`
-- `arity` (`u8`): 파라미터 개수
-- `slots` (`u8`): 프레임 레지스터 개수
-- `upvalues` (`u8`): 클로저 캡처 개수
+## 비트 포맷
+- 공통: `op`는 상위 6비트 (`bits 31..26`)
+- `ABC`: `op(6) | A(8) | B(9) | C(9)`
+- `ABx`: `op(6) | A(8) | Bx(18)`
+- `sAx`: `op(6) | sAx(26)` (2의 보수 signed)
 
-제약:
-- `arity <= slots`
-- `code_begin`, `code_end`, chunk 인덱스, 상수 인덱스는 `u32` 범위를 사용한다.
+## 인자 범위
+- 레지스터 A: 8비트
+- 레지스터 B/C: 9비트
+- 인덱스 Bx: 18비트
+- 점프 sAx: signed 26비트, 단위는 워드(명령어 개수)
 
-## 레지스터/호출 규약
-- 현재 프레임의 `R[x]`는 `v_stack_[base + x]`에 대응한다.
+## 호출 규약
 - `CALL F argc retc`
   - callee: `R[F]`
   - args: `R[F+1] .. R[F+argc]`
-  - result write-back: `R[F] .. R[F+retc-1]`
-- 바이트코드 함수 인자 개수 보정
+  - 결과 저장: `R[F] .. R[F+retc-1]`
+- 바이트코드 함수 인자 보정
   - 부족한 인자는 `nil`로 채움
   - 초과 인자는 무시
 
+## 제어 흐름
+- `JMP rel`: 무조건 상대 점프
+- 조건 분기: `IF*` + `JMP` 조합
+  - `IF*`는 조건이 거짓이면 다음 1워드를 건너뜀
+
+예시:
+```sura
+LT 9 0 3
+IFFALSEY 9
+JMP loop_end
+```
+
 ## Opcode 목록
-| Opcode | Byte | Arguments | Argument Type | 동작 |
-| --- | --- | --- | --- | --- |
-| MOVE | `0x01` | `A B` | `u8, u8` | `R[A] = R[B]` |
-| LOADNIL | `0x02` | `A` | `u8` | `R[A] = nil` |
-| LOADTRUE | `0x03` | `A` | `u8` | `R[A] = true` |
-| LOADFALSE | `0x04` | `A` | `u8` | `R[A] = false` |
-| LOADK | `0x05` | `A K` | `u8, u32` | `R[A] = constants[K]` |
-| GETGLOBAL | `0x08` | `A K` | `u8, u32` | `R[A] = globals[constants[K]]` |
-| SETGLOBAL | `0x09` | `K A` | `u32, u8` | `globals[constants[K]] = R[A]` |
-| ADD/SUB/MUL/DIV/IDIV/MOD/POW | `0x10..0x16` | `A B C` | `u8, u8, u8` | 산술 연산 |
-| NEG/NOT | `0x17..0x18` | `A B` | `u8, u8` | 단항 연산 |
-| AND/OR | `0x19..0x1A` | `A B C` | `u8, u8, u8` | bool 논리 연산 |
-| EQ/NE/LT/LE/GT/GE | `0x20..0x25` | `A B C` | `u8, u8, u8` | 비교 결과(bool) |
-| BAND/BOR/BXOR/SHL/SHR | `0x30..0x34` | `A B C` | `u8, u8, u8` | 비트 연산 |
-| NEWTABLE | `0x40` | `A` | `u8` | `R[A] = {}` |
-| GETTABLE | `0x41` | `A B C` | `u8, u8, u8` | `R[A] = R[B][R[C]]` |
-| SETTABLE | `0x42` | `A B C` | `u8, u8, u8` | `R[A][R[B]] = R[C]` |
-| JMP | `0x50` | `rel` | `i16` | 상대 점프 |
-| JMPIF | `0x51` | `A rel` | `u8, i16` | `R[A]`가 falsey면 점프 |
-| CALL | `0x60` | `F argc retc` | `u8, u8, u8` | 함수 호출 |
-| RETURN | `0x61` | `A retc` | `u8, u8` | `R[A..]` 반환 |
-| CLOSURE | `0x62` | `A chunk` | `u8, u32` | `R[A]`에 closure 생성 |
-| GETUPVAL | `0x63` | `A U` | `u8, u8` | `R[A] = upvalue[U]` |
-| SETUPVAL | `0x64` | `U A` | `u8, u8` | `upvalue[U] = R[A]` |
+| Opcode | 포맷 | 인자 | 동작 |
+| --- | --- | --- | --- |
+| MOVE | ABx | `A B` | `R[A] = R[B]` |
+| LOADNIL / LOADTRUE / LOADFALSE | ABx | `A` | 상수 로드 |
+| LOADK | ABx | `A K` | `R[A] = constants[K]` |
+| GETGLOBAL | ABx | `A K` | `R[A] = globals[constants[K]]` |
+| SETGLOBAL | ABx | `K A` | `globals[constants[K]] = R[A]` |
+| ADD/SUB/MUL/DIV/IDIV/MOD/POW | ABC | `A B C` | 산술 연산 |
+| NEG / NOT | ABx | `A B` | 단항 연산 |
+| AND / OR | ABC | `A B C` | bool 논리 연산 |
+| EQ/NE/LT/LE/GT/GE | ABC | `A B C` | 비교 결과(bool) 저장 |
+| BAND/BOR/BXOR/SHL/SHR | ABC | `A B C` | 비트 연산 |
+| NEWTABLE | ABx | `A` | `R[A] = {}` |
+| GETTABLE | ABC | `A B C` | `R[A] = R[B][R[C]]` |
+| SETTABLE | ABC | `A B C` | `R[A][R[B]] = R[C]` |
+| JMP | sAx | `rel` | 무조건 상대 점프 |
+| IFFALSEY / IFTRUTHY | ABx | `A` | 조건 거짓 시 다음 1워드 스킵 |
+| IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `B C` | 비교 거짓 시 다음 1워드 스킵 |
+| CALL | ABC | `F argc retc` | 함수 호출 |
+| RETURN | ABx | `A retc` | `R[A..]` 반환 |
+| CLOSURE | ABx | `A chunk` | `R[A]`에 closure 생성 |
+| GETUPVAL | ABx | `A U` | `R[A] = upvalue[U]` |
+| SETUPVAL | ABx | `U A` | `upvalue[U] = R[A]` |
 
 ## CLOSURE 캡처 규약
 `CLOSURE A chunk`에서 `chunk.upvalues = n`이면:
