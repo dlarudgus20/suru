@@ -861,6 +861,15 @@ void VM::run(std::size_t target_depth) {
                 reg_write(w.a, Value::closure(closure));
                 break;
             }
+            case Op::Close: {
+                const auto w = decode_abx(word);
+                const auto slots = frame_limit - (frame.base + 1U);
+                if (w.a > slots) {
+                    throw InvalidCodeError("close register boundary out of bounds");
+                }
+                close_upvalues(frame.base + 1U + w.a);
+                break;
+            }
             case Op::GetUpvalue: {
                 const auto w = decode_abx(word);
                 if (w.a > std::numeric_limits<std::uint8_t>::max() || static_cast<std::uint8_t>(w.a) >= current->len) {

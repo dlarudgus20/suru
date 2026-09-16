@@ -15,8 +15,9 @@
 - VARGPREP의 첫 명령/1회 실행 제한은 의도적으로 없다. 현재 인수열을 재해석하며, 기존 upvalue는 원래 슬롯에 남는다.
 - SBC는 현재 형식만 읽고 쓰며 개발 중 만들어진 이전 이미지의 호환 변환은 제공하지 않는다.
 - `PUSHARRAYX A B count`와 `PUSHARRAYX.v A B`는 배열 끝에 고정/open 레지스터열을 추가하며 top은 유지한다.
-- 범위 제외: CLOSE, source codegen.
-- 검증: CTest 16개 통과, 새 VM 테스트 24개(인수 조합 117개 포함), CLI 회귀 6개. ASan/UBSan도 동일하게 통과했다. 실행 환경 제한으로 LeakSanitizer는 제외했다.
+- `CLOSE A`는 현재 register bank의 `[R[A], R[slots])`에 열린 upvalue를 닫는다. `A == slots`는 빈 범위다.
+- 범위 제외: source codegen.
+- 검증: CTest 16개 통과, VM GTest 43개(인수 조합 117개 포함), CLI 회귀 7개. ASan/UBSan도 동일하게 통과했다. 실행 환경 제한으로 LeakSanitizer는 제외했다.
 
 ## 2026-02-27 #3
 - `suru-bc`에 `-o <out.sbc> <in.sura>` 옵션이 추가되었다.

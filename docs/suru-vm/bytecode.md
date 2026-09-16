@@ -98,6 +98,11 @@
 
 `CLOSURE A chunk` 실행 시, 대상 chunk의 `upvalue_infos` 순서대로 업밸류가 채워진 클로저를 만들고 `R[A]`에 저장한다.
 
+`CLOSE A`는 현재 register bank의 `R[A]` 이상에 열린 upvalue를 모두 닫는다.
+범위는 `[A, slots)`이며 `A == slots`는 빈 범위로 허용한다.
+레지스터 값과 `top`은 바꾸지 않고, 이미 닫힌 upvalue에는 영향이 없다.
+이전 `VARGPREP` register bank의 upvalue는 현재 범위에 포함되지 않으며 프레임 종료 시 닫힌다.
+
 ## 어셈블리(.sura) 포맷
 - 섹션
   - `.const`
@@ -177,5 +182,6 @@ RETURN 0 1
 | VARG | ABx | `A count` | extra count개 복사, 부족분 nil |
 | VARG.v | ABx | `A` | extra 전부 복사, top 갱신 |
 | CLOSURE | ABx | `A Bx` | `R[A] = closure(Bx)` |
+| CLOSE | ABx | `A` | 현재 bank의 `[R[A], R[slots])` upvalue를 닫음 |
 | GETUPVAL | ABx | `A Bx` | `R[Bx] = U[A]` |
 | SETUPVAL | ABx | `A Bx` | `U[A] = RI[Bx]` |

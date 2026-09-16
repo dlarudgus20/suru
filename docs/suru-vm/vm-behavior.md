@@ -62,6 +62,10 @@ prep이 레지스터를 옮겨도 기존 upvalue는 옛 슬롯을 계속 참조�
 옛 고정 슬롯은 nil이 되며, 새 고정 레지스터와 같은 local로 자동 연결되지 않는다.
 프레임 종료/예외 해제 때 frame_start 이상을 모두 닫으므로 옛 슬롯의 upvalue도 안전하다.
 
+`CLOSE A`는 현재 `base+1+A`를 경계로 열린 upvalue를 닫는다.
+새 register bank는 과거 bank보다 항상 뒤에 있으므로 과거 bank의 upvalue는 닫지 않는다.
+`A == slots`는 빈 범위이며, `A > slots`는 잘못된 바이트코드다.
+
 ## C/API 호출
 - C 함수 인수는 base+1부터 시작하고 closure는 stack API에서 숨긴다.
 - `getlocal(uint32_t)`와 `stack_top()`은 C/API 프레임의 보이는 값을 조회한다.

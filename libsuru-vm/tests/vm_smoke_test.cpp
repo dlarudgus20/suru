@@ -164,6 +164,80 @@ TEST(VmSmokeTest, SupportsUpvalueCaptureAndMutation) {
     EXPECT_EQ(out.number_, 11.0);
 }
 
+TEST(VmSmokeTest, CloseClosesRegisterSuffixOnly) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->constants_.push_back(suru::vm::Value::number(10.0));
+    cu->constants_.push_back(suru::vm::Value::number(20.0));
+    cu->constants_.push_back(suru::vm::Value::number(30.0));
+    cu->constants_.push_back(suru::vm::Value::number(40.0));
+
+    const std::uint32_t main_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Closure, 2, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Closure, 3, 2));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Close, 4, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Close, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Close, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 2));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 3));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Call, 2, 0, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::Call, 3, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 2, 2));
+    const std::uint32_t main_end = to_u32(cu->code_.size());
+
+    const std::uint32_t get_r0_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::GetUpvalue, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t get_r0_end = to_u32(cu->code_.size());
+
+    const std::uint32_t get_r1_begin = to_u32(cu->code_.size());
+    cu->code_.push_back(pack_abx(suru::vm::Op::GetUpvalue, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 1));
+    const std::uint32_t get_r1_end = to_u32(cu->code_.size());
+
+    cu->chunks_.push_back(suru::vm::Chunk {"main", main_begin, main_end, 0, 4, {}});
+    cu->chunks_.push_back(suru::vm::Chunk {
+        "get_r0", get_r0_begin, get_r0_end, 0, 1,
+        {{suru::vm::UpvalueSource::Local, 0}},
+    });
+    cu->chunks_.push_back(suru::vm::Chunk {
+        "get_r1", get_r1_begin, get_r1_end, 0, 1,
+        {{suru::vm::UpvalueSource::Local, 1}},
+    });
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_NO_THROW(vm.call(0, 2));
+
+    ASSERT_GE(vm.stack_top(), 2U);
+    const suru::vm::Value closed_r1 = vm.pop_value();
+    const suru::vm::Value open_r0 = vm.pop_value();
+    ASSERT_EQ(open_r0.kind, suru::vm::ValueKind::Number);
+    ASSERT_EQ(closed_r1.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(open_r0.number_, 30.0);
+    EXPECT_EQ(closed_r1.number_, 20.0);
+}
+
+TEST(VmSmokeTest, CloseRejectsBoundaryPastSlots) {
+    suru::vm::VM vm;
+
+    suru::vm::CodeUnit* cu = vm.make_code_unit();
+    ASSERT_NE(cu, nullptr);
+    cu->code_.push_back(pack_abx(suru::vm::Op::Close, 2, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 0));
+    cu->chunks_.push_back(suru::vm::Chunk {"main", 0, to_u32(cu->code_.size()), 0, 1, {}});
+
+    suru::vm::Closure* entry = vm.make_closure(cu, 0);
+    ASSERT_NE(entry, nullptr);
+    vm.push_value(suru::vm::Value::closure(entry));
+    EXPECT_THROW(vm.call(0, 0), suru::vm::InvalidCodeError);
+}
+
 TEST(VmSmokeTest, KeepsUpvalueAliveAfterOuterReturns) {
     suru::vm::VM vm;
 

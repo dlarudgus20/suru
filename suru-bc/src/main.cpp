@@ -325,6 +325,7 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"VARGPREP", suru::vm::Op::VargPrep},
         {"VARG", suru::vm::Op::Varg},
         {"CLOSURE", suru::vm::Op::Closure},
+        {"CLOSE", suru::vm::Op::Close},
         {"GETUPVAL", suru::vm::Op::GetUpvalue},
         {"SETUPVAL", suru::vm::Op::SetUpvalue},
     };
@@ -558,7 +559,8 @@ std::uint32_t emit_word(
         case suru::vm::Op::LoadFalse:
         case suru::vm::Op::NewTable:
         case suru::vm::Op::IfFalsy:
-        case suru::vm::Op::IfTruthy: {
+        case suru::vm::Op::IfTruthy:
+        case suru::vm::Op::Close: {
             if (inst.args.size() != 1) {
                 throw AsmError(inst.line, "opcode requires one operand");
             }

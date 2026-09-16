@@ -45,6 +45,12 @@ class BytecodeCliTest(unittest.TestCase):
     def test_late_and_repeated_prep(self):
         self.run_source(".chunk main @va 1\nLOAD 0 #42\nVARGPREP 0\nVARGPREP 0\nRETURN.v 0\n")
 
+    def test_close_syntax(self):
+        self.run_source(".chunk main 0 0\nCLOSE 0\nRETURN 0 0\n")
+        for instruction in ("CLOSE", "CLOSE 0 1", "CLOSE.v 0"):
+            with self.subTest(instruction=instruction):
+                self.run_source(".chunk main 0 0\n" + instruction + "\n", False)
+
     def test_nonzero_result_contract_and_zero_varargs(self):
         source = '''.const
 k_print = string "print"
