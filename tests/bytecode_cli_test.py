@@ -1,4 +1,4 @@
-"""Assembler and SBC compatibility regressions, using only the Python standard library."""
+"""Assembler and SBC CLI regressions, using only the Python standard library."""
 import pathlib
 import struct
 import subprocess
@@ -7,10 +7,6 @@ import tempfile
 import unittest
 
 CLI = pathlib.Path(sys.argv.pop(1)).resolve()
-
-
-def word(op, a=0, bx=0, v=False):
-    return (op << 26) | (int(v) << 25) | (a << 17) | bx
 
 
 class BytecodeCliTest(unittest.TestCase):
@@ -24,7 +20,7 @@ class BytecodeCliTest(unittest.TestCase):
             if success:
                 emitted = subprocess.run([CLI, "-o", image_path, source_path], capture_output=True, text=True)
                 self.assertEqual(emitted.returncode, 0, emitted.stderr)
-                self.assertEqual(struct.unpack_from("<I", image_path.read_bytes(), 4)[0], 2)
+                self.assertEqual(struct.unpack_from("<I", image_path.read_bytes(), 4)[0], 1)
                 loaded = subprocess.run([CLI, image_path], capture_output=True, text=True)
                 self.assertEqual(loaded.returncode, 0, loaded.stderr)
                 self.assertEqual(loaded.stdout, result.stdout)
@@ -63,30 +59,6 @@ VARG.v 0
 RETURN.v 0
 '''
         self.assertIn("nil\tnil", self.run_source(source).stdout)
-
-    def test_version1_including_fixed_255_and_ignored_i(self):
-        # Hand-built v1 fixture: print(7), using i=1 on CALL/RETURN (ignored in v1).
-        code = [word(5, 0, 0), word(0, 1, 7, True),
-                word(46, 0, (1 << 9), True), word(47, 0, 0, True)]
-        for arity, slots in ((0, 2), (255, 255)):
-            with self.subTest(arity=arity), tempfile.TemporaryDirectory(prefix="suru-v1-") as directory:
-                data = struct.pack("<6I", 0x43425300, 1, 1, 1, len(code), 0)
-                data += struct.pack("<BI", 2, 5) + b"print"
-                data += struct.pack("<I", 4) + b"main"
-                data += struct.pack("<IIBBH", 0, len(code), arity, slots, 0)
-                data += struct.pack("<4I", *code)
-                path = pathlib.Path(directory) / "legacy.sbc"
-                path.write_bytes(data)
-                result = subprocess.run([CLI, path], capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("7.000000", result.stdout)
-                bad_version = bytearray(data)
-                struct.pack_into("<I", bad_version, 4, 999)
-                path.write_bytes(bad_version)
-                result = subprocess.run([CLI, path], capture_output=True, text=True)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("unsupported sbc version", result.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

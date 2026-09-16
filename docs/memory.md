@@ -13,9 +13,9 @@
 - VM vararg/multret 구현: `.chunk name @va slots`, `CALL.v F retc`, `RETURN.v A`, `VARGPREP n`, `VARG A count`, `VARG.v A`, CALL retc=511.
 - base는 closure 슬롯이며 반환 정보는 callee의 return_base/retc로 통합했다. frame_start는 반복 prep 이전 슬롯의 수명/정리 경계다.
 - VARGPREP의 첫 명령/1회 실행 제한은 의도적으로 없다. 현재 인수열을 재해석하며, 기존 upvalue는 원래 슬롯에 남는다.
-- SBC emitter v2, loader v1/v2. v1 고정 arity 255는 로딩 시 prep prologue로 변환한다.
+- SBC는 현재 형식만 읽고 쓰며 개발 중 만들어진 이전 이미지의 호환 변환은 제공하지 않는다.
 - 범위 제외: CLOSE, SETARRAYX, source codegen.
-- 검증: CTest 16개 통과, 새 VM 테스트 21개(인수 조합 117개 포함), CLI 회귀 6개. ASan/UBSan도 동일하게 통과했다. 실행 환경 제한으로 LeakSanitizer는 제외했다.
+- 검증: CTest 16개 통과, 새 VM 테스트 21개(인수 조합 117개 포함), CLI 회귀 5개. ASan/UBSan도 동일하게 통과했다. 실행 환경 제한으로 LeakSanitizer는 제외했다.
 
 ## 2026-02-27 #3
 - `suru-bc`에 `-o <out.sbc> <in.sura>` 옵션이 추가되었다.

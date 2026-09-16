@@ -44,7 +44,7 @@
 | name | `u8[name_len]` | UTF-8 이름 |
 | code_begin | `u32` | 코드 시작 워드 인덱스 |
 | code_end | `u32` | 코드 끝 워드 인덱스(exclusive) |
-| arity | `u8` | v2: 고정 파라미터 수 0..254, 255는 @va |
+| arity | `u8` | 고정 파라미터 수 0..254, 255는 @va |
 | slots | `u8` | 레지스터 슬롯 개수 |
 | upvalue_count | `u16` | 업밸류 정보 개수 |
 | upvalues | 반복 | `source:u8, index:u8` |
@@ -60,17 +60,14 @@
 - 섹션 길이와 실제 파일 길이가 맞지 않으면 실패
 - `entry_chunk_index >= chunk_count`면 실패
 - `code_begin > code_end` 또는 `code_end > code_word_count`면 실패
-- 고정 arity에서 `arity > slots`면 실패 (v2의 `@va`는 예외)
+- 고정 arity에서 `arity > slots`면 실패 (`@va`는 예외)
 - 상수 태그 미지원이면 실패
 - 실패 카테고리는 `InvalidImageError` 권장
 
-## 버전/호환성 정책
-- emitter는 version 2를 기록하며 loader는 version 1과 2를 받는다.
-- v2는 기존 컨테이너 구조를 유지하면서 `arity=255`, `.v`, `retc=511`, VARGPREP(55), VARG(56)를 정의한다.
-- v1의 CALL/RETURN i 비트는 지워서 기존의 무시 동작을 유지한다.
-- v1의 고정 arity 255 함수는 로드할 때 복제된 본문 앞에 `VARGPREP 255`를 삽입해 보존한다.
-- 그 외 버전은 거부한다. VARGPREP 위치/횟수 제한은 없다.
-- 호환성이 필요한 변경은 버전을 증가시켜 관리한다.
+## 형식 검증
+- `version`은 현재 값 1만 허용한다.
+- 개발 중 만들어진 이전 `.sbc`에 대한 호환 변환은 제공하지 않는다.
+- 형식이 바뀌면 현재 assembler로 `.sbc`를 다시 생성한다.
 
 ## 최소 예시 (개념)
 - 상수 1개(`number 1.0`)

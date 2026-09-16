@@ -26,7 +26,7 @@ constexpr std::uint32_t kIShift = 25U;
 constexpr std::uint32_t kIMask = 0x1U;
 constexpr std::uint32_t kAxMask = 0x1FFFFFFU;
 constexpr std::uint32_t kSbcMagic = 0x43425300U; // "\0SBC" in little-endian bytes
-constexpr std::uint32_t kSbcVersion = 2U;
+constexpr std::uint32_t kSbcVersion = 1U;
 
 struct CompiledUnit {
     suru::vm::CodeUnit* code {nullptr};
@@ -1103,7 +1103,7 @@ CompiledUnit load_sbc_file(suru::vm::VM& vm, const std::filesystem::path& path) 
         throw std::runtime_error("invalid sbc magic");
     }
     const std::uint32_t version = rd.read_u32();
-    if (version != 1U && version != kSbcVersion) {
+    if (version != kSbcVersion) {
         throw std::runtime_error("unsupported sbc version");
     }
 
@@ -1170,7 +1170,7 @@ CompiledUnit load_sbc_file(suru::vm::VM& vm, const std::filesystem::path& path) 
         throw std::runtime_error("entry chunk index out of bounds");
     }
     for (const suru::vm::Chunk& chunk : cu->chunks_) {
-        if ((version == 1U || chunk.arity != 255) && chunk.arity > chunk.slots) {
+        if (chunk.arity != 255 && chunk.arity > chunk.slots) {
             throw std::runtime_error("chunk arity exceeds slots");
         }
         if (chunk.code_begin > chunk.code_end || chunk.code_end > code_word_count) {
@@ -1178,28 +1178,6 @@ CompiledUnit load_sbc_file(suru::vm::VM& vm, const std::filesystem::path& path) 
         }
     }
 
-    if (version == 1U) {
-        for (auto& word : cu->code_) {
-            const auto op = static_cast<suru::vm::Op>(word >> kOpShift);
-            if (static_cast<std::uint32_t>(op) > static_cast<std::uint32_t>(suru::vm::Op::SetArrayI)) {
-                throw std::runtime_error("unsupported opcode in sbc version 1");
-            }
-            if (op == suru::vm::Op::Call || op == suru::vm::Op::Return) {
-                word &= ~(1U << kIShift); // ignored by v1, now the open-list flag
-            }
-        }
-        for (auto& chunk : cu->chunks_) {
-            if (chunk.arity == 255) {
-                // v1 used 255 as a fixed arity. Give its unchanged body a prep prologue.
-                const std::vector<std::uint32_t> body(cu->code_.begin() + chunk.code_begin,
-                                                       cu->code_.begin() + chunk.code_end);
-                chunk.code_begin = checked_u32(cu->code_.size(), 0, "code size");
-                cu->code_.push_back(pack_abx(suru::vm::Op::VargPrep, 255, 0));
-                cu->code_.insert(cu->code_.end(), body.begin(), body.end());
-                chunk.code_end = checked_u32(cu->code_.size(), 0, "code size");
-            }
-        }
-    }
     return CompiledUnit {cu, entry_chunk_index};
 }
 
