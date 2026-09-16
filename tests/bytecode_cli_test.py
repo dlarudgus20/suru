@@ -30,7 +30,8 @@ class BytecodeCliTest(unittest.TestCase):
         self.run_source(".chunk main @va 1\nVARGPREP 0\nVARG.v 0\nRETURN.v 0\n")
 
     def test_dummy_or_unsupported_open_operands_rejected(self):
-        for instruction in ("RETURN.v 0 _", "VARG.v 0 _", "CALL.v 0 _ 0", "LOAD.v 0", "VARGPREP.v 0"):
+        for instruction in ("RETURN.v 0 _", "VARG.v 0 _", "CALL.v 0 _ 0",
+                            "PUSHARRAYX.v 0 1 _", "LOAD.v 0", "VARGPREP.v 0"):
             with self.subTest(instruction=instruction):
                 self.run_source(".chunk main @va 2\n" + instruction + "\n", False)
 
@@ -59,6 +60,28 @@ VARG.v 0
 RETURN.v 0
 '''
         self.assertIn("nil\tnil", self.run_source(source).stdout)
+
+    def test_pusharrayx_fixed_and_open(self):
+        source = '''.const
+k_print = string "print"
+.chunk main 0 5
+NEWARRAY 0 #0
+LOAD 1 #10
+LOAD 2 #20
+PUSHARRAYX 0 1 2
+CLOSURE 1 values
+CALL 1 0 511
+PUSHARRAYX.v 0 1
+LEN 4 0
+GETGLOBALK k_print 3
+CALL 3 1 0
+RETURN 0 0
+.chunk values 0 2
+LOAD 0 #30
+LOAD 1 #40
+RETURN 0 2
+'''
+        self.assertIn("4.000000", self.run_source(source).stdout)
 
 if __name__ == "__main__":
     unittest.main()

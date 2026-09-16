@@ -653,6 +653,23 @@ void VM::run(std::size_t target_depth) {
                 array->elements[idx] = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
                 break;
             }
+            case Op::PushArrayX: {
+                const auto w = decode_abc(word);
+                const auto reg_begin = frame.base + 1U;
+                const auto slots = frame_limit - reg_begin;
+                if (w.b > slots || (!w.i && w.c > slots - w.b)) {
+                    throw InvalidCodeError("pusharrayx source range out of bounds");
+                }
+                const auto source_begin = reg_begin + w.b;
+                if (w.i && (frame.top < source_begin || frame.top > v_stack_.size())) {
+                    throw InvalidCodeError("invalid open pusharrayx range");
+                }
+                const auto source_end = w.i ? frame.top : source_begin + w.c;
+                Array* array = reg_read(w.a).as_array("pusharrayx");
+                array->elements.insert(array->elements.end(),
+                    v_stack_.begin() + source_begin, v_stack_.begin() + source_end);
+                break;
+            }
             case Op::Jmp: {
                 const auto [sax] = decode_sax(word);
                 const std::int64_t next = static_cast<std::int64_t>(frame.pc) + sax;

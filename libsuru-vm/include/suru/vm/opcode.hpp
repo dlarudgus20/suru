@@ -70,6 +70,7 @@ enum class Op : std::uint8_t {
     SetArrayI = 54,
     VargPrep = 55,
     Varg = 56,
+    PushArrayX = 57,
 };
 
 } // namespace suru::vm

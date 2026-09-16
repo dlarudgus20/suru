@@ -192,6 +192,51 @@ TEST_F(VarargTest, EscapingClosureCapturesFinalFixedRegister) {
     numbers({42});
 }
 
+TEST_F(VarargTest, PushArrayXAppendsFixedRangeAndAcceptsEmptyEndRange) {
+    Array* array = vm.make_array(1);
+    array->elements[0] = Value::number(5);
+    cu->constants_.push_back(Value::array(array));
+    chunk(0, 4, {abx(Op::LoadK, 0, 0), abc(Op::PushArrayX, 0, 4, 0),
+        abx(Op::Load, 1, 10, true), abx(Op::Load, 2, 20, true),
+        abc(Op::PushArrayX, 0, 1, 2), abx(Op::Return, 0, 1)});
+    invoke({});
+    ASSERT_EQ(vm.stack_top(), 1U);
+    Array* result = vm.getlocal(0).as_array("test result");
+    ASSERT_EQ(result->elements.size(), 3U);
+    EXPECT_EQ(result->elements[0].number_, 5);
+    EXPECT_EQ(result->elements[1].number_, 10);
+    EXPECT_EQ(result->elements[2].number_, 20);
+}
+
+TEST_F(VarargTest, OpenPushArrayXAppendsTailBeyondFixedSlots) {
+    Array* array = vm.make_array(0);
+    cu->constants_.push_back(Value::array(array));
+    chunk(255, 2, {abx(Op::VargPrep, 0), abx(Op::LoadK, 0, 0),
+        abx(Op::Varg, 1, 0, true), abc(Op::PushArrayX, 0, 1, 123, true),
+        abx(Op::Return, 0, 0, true)});
+    vm.push_value(Value::closure(vm.make_closure(cu, 0)));
+    for (unsigned i = 0; i < 300; ++i) vm.push_value(Value::number(i));
+    vm.call(300, VM::multret);
+    ASSERT_EQ(vm.stack_top(), 301U); // PUSHARRAYX keeps the open top unchanged.
+    Array* result = vm.getlocal(0).as_array("test result");
+    ASSERT_EQ(result->elements.size(), 300U);
+    for (unsigned i = 0; i < 300; ++i) {
+        EXPECT_EQ(result->elements[i].number_, i);
+        EXPECT_EQ(vm.getlocal(i + 1U).number_, i);
+    }
+}
+
+TEST_F(VarargTest, PushArrayXRejectsInvalidFixedAndOpenRanges) {
+    Array* array = vm.make_array(0);
+    cu->constants_.push_back(Value::array(array));
+    chunk(0, 2, {abx(Op::LoadK, 0, 0), abc(Op::PushArrayX, 0, 1, 2)});
+    EXPECT_THROW(invoke({}), InvalidCodeError);
+    EXPECT_TRUE(array->elements.empty());
+    cu->code_[1] = abc(Op::PushArrayX, 0, 2, 0, true);
+    EXPECT_THROW(invoke({}), InvalidCodeError);
+    EXPECT_TRUE(array->elements.empty());
+}
+
 TEST_F(VarargTest, InvalidRangesThrowAndVmIsReusable) {
     chunk(255, 1, {abx(Op::VargPrep, 2), abx(Op::Return, 0, 0)});
     EXPECT_THROW(invoke({1, 2}), InvalidCodeError);

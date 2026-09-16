@@ -310,6 +310,7 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"SETARRAY", suru::vm::Op::SetArray},
         {"GETARRAYI", suru::vm::Op::GetArrayI},
         {"SETARRAYI", suru::vm::Op::SetArrayI},
+        {"PUSHARRAYX", suru::vm::Op::PushArrayX},
         {"JMP", suru::vm::Op::Jmp},
         {"IFFALSY", suru::vm::Op::IfFalsy},
         {"IFTRUTHY", suru::vm::Op::IfTruthy},
@@ -368,7 +369,14 @@ std::uint32_t emit_word(
             return pack_abx(op,
                 checked_u8(parse_u64(inst.args[0], inst.line, "register"), inst.line, "register"), 0, true);
         }
-        throw AsmError(inst.line, "expected CALL.v F retc, RETURN.v A, or VARG.v A");
+        if (op == suru::vm::Op::PushArrayX && inst.args.size() == 2) {
+            return pack_abc_i(op,
+                checked_u8(parse_u64(inst.args[0], inst.line, "array register"), inst.line, "array register"),
+                checked_u8(parse_u64(inst.args[1], inst.line, "source register"), inst.line, "source register"),
+                0, true);
+        }
+        throw AsmError(inst.line,
+            "expected CALL.v F retc, RETURN.v A, VARG.v A, or PUSHARRAYX.v A B");
     }
 
     auto is_immediate = [](std::string_view tok) {
@@ -614,6 +622,16 @@ std::uint32_t emit_word(
                 return pack_abc_i(op, a, b, imm, true);
             }
             return pack_abc_i(op, a, b, parse_reg9(inst.args[2], "operand C"), false);
+        }
+        case suru::vm::Op::PushArrayX: {
+            if (inst.args.size() != 3) {
+                throw AsmError(inst.line, "PUSHARRAYX requires three operands");
+            }
+            return pack_abc_i(op,
+                parse_reg8(inst.args[0], "array register"),
+                parse_reg8(inst.args[1], "source register"),
+                checked_u9(parse_u64(inst.args[2], inst.line, "count"), inst.line, "count"),
+                false);
         }
         case suru::vm::Op::IfEq:
         case suru::vm::Op::IfNe:

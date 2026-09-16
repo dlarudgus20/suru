@@ -75,6 +75,12 @@
 - `SETARRAY A B C`
   - `R[A]`는 array, `R[B]`는 인덱스, `R[C]`는 저장 값이다.
   - 인덱스 규칙/오류는 `GETARRAY`와 동일하다.
+- `PUSHARRAYX A B count`
+  - `R[A]`는 array이며 `R[B..B+count)`를 배열의 현재 끝에 순서대로 추가한다.
+  - `count=0`이면 빈 범위이며 `B==slots`도 허용한다.
+- `PUSHARRAYX.v A B`
+  - `R[B]`부터 동적 `top` 직전까지 배열의 현재 끝에 추가한다.
+  - open tail은 고정 `slots` 밖까지 이어질 수 있다. 명령 실행 후 `top`은 유지한다.
 
 ## Immediate 규약
 - 어셈블리에서 immediate는 `#` 접두사로 표기한다.
@@ -83,7 +89,7 @@
   - ABC: `ADD SUB MUL DIV IDIV MOD POW CONCAT EQ NE LT LE GT GE BAND BOR BXOR SHL SHR GETARRAY SETARRAY SETTABLE IFEQ IFNE IFLT IFLE IFGT IFGE SETARRAYI`
   - ABx: `LOAD NEWARRAY SETGLOBALK SETUPVAL SETGLOBAL`
 - 그 외 opcode에서 `i`는 무시된다.
-  - 단, `CALL`, `RETURN`, `VARG`에서는 `i`가 위의 `.v` 플래그다.
+  - 단, `CALL`, `RETURN`, `VARG`, `PUSHARRAYX`에서는 `i`가 위의 `.v` 플래그다.
 
 ## 업밸류 캡처 규약
 `Chunk`는 `upvalue_infos`를 가진다. 각 항목은 `{ source, index }`다.
@@ -158,6 +164,8 @@ RETURN 0 1
 | SETARRAY | ABC | `A B C` | `R[A][R[B]] = RI[C]` |
 | GETARRAYI | ABC | `A B C` | `R[A] = R[C][I[B]]` |
 | SETARRAYI | ABC | `A B C` | `R[A][I[B]] = RI[C]` |
+| PUSHARRAYX | ABC | `A B count` | `R[B..B+count)`를 `R[A]` 끝에 추가 |
+| PUSHARRAYX.v | ABC | `A B` | `R[B..top)`을 `R[A]` 끝에 추가 |
 | JMP | sAx | `rel` | `pc = pc + rel` |
 | IFFALSY / IFTRUTHY | ABx | `A Bx` | `if cond(R[A]) then pc = pc + 1` |
 | IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `A B C` | `if not cmp(R[B], RI[C]) then pc = pc + 1` |
