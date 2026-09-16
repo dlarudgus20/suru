@@ -29,7 +29,10 @@
   - 인자: `R[F+1] .. R[F+argc]`
   - 결과 저장: `R[F] .. R[F+retc-1]`
 - `CALL.v F retc`: argc 필드를 무시하고 `R[F+1]`부터 동적 `top` 직전까지 전달한다.
-- `retc=511` (`0x1ff`): 결과를 전부 받는다. 그 외에는 고정 개수로 절단/`nil` 보충한다.
+- assembler의 `retc`는 `0..510` 또는 `@vret`이다.
+  - `@vret`은 바이트코드 C=511 (`0x1ff`)로 인코딩하며 결과를 전부 받는다.
+  - 숫자 `511`과 `0x1ff` 표기는 거부한다.
+  - 고정 개수는 실제 결과를 절단하거나 부족분을 `nil`로 보충한다.
 - CALL 반환 후 `top`은 결과 범위의 끝이다. 일반 레지스터 쓰기는 `top`을 바꾸지 않는다.
 - `RETURN.v A`: `R[A]`부터 `top` 직전까지 반환한다.
 - `.v`는 `i` 비트를 재사용한다. 생략된 필드는 assembler가 0으로 인코딩하며 VM은 무시한다.
@@ -174,8 +177,8 @@ RETURN 0 1
 | JMP | sAx | `rel` | `pc = pc + rel` |
 | IFFALSY / IFTRUTHY | ABx | `A Bx` | `if cond(R[A]) then pc = pc + 1` |
 | IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `A B C` | `if not cmp(R[B], RI[C]) then pc = pc + 1` |
-| CALL | ABC | `F argc retc` | `call(R[F], argc, retc)` |
-| CALL.v | ABC | `F retc` | `R[F+1]`부터 `top`까지 전달 |
+| CALL | ABC | `F argc retc` | `call(R[F], argc, retc)`; retc는 `0..510` 또는 `@vret` |
+| CALL.v | ABC | `F retc` | `R[F+1]`부터 `top`까지 전달; retc는 `0..510` 또는 `@vret` |
 | RETURN | ABx | `A Bx` | `return R[A..A+Bx-1]` |
 | RETURN.v | ABx | `A` | `R[A]`부터 `top`까지 반환 |
 | VARGPREP | ABx | `n` | 현재 인수열을 고정 n개와 extra로 재배치 |

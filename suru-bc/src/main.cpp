@@ -360,11 +360,21 @@ std::uint32_t emit_word(
     const bool open = inst.op.ends_with(".v");
     const std::string_view name = inst.op;
     const suru::vm::Op op = parse_op(open ? name.substr(0, name.size() - 2U) : name, inst.line);
+    auto parse_return_count = [&](std::string_view token) {
+        if (token == "@vret") {
+            return static_cast<std::uint32_t>(suru::vm::VM::multret);
+        }
+        const auto count = parse_u64(token, inst.line, "return count");
+        if (count >= suru::vm::VM::multret) {
+            throw AsmError(inst.line, "return count must be 0..510 or @vret");
+        }
+        return static_cast<std::uint32_t>(count);
+    };
     if (open) {
         if (op == suru::vm::Op::Call && inst.args.size() == 2) {
             return pack_abc_i(op,
                 checked_u8(parse_u64(inst.args[0], inst.line, "register"), inst.line, "register"), 0,
-                checked_u9(parse_u64(inst.args[1], inst.line, "return count"), inst.line, "return count"), true);
+                parse_return_count(inst.args[1]), true);
         }
         if ((op == suru::vm::Op::Return || op == suru::vm::Op::Varg) && inst.args.size() == 1) {
             return pack_abx(op,
@@ -597,6 +607,9 @@ std::uint32_t emit_word(
             }
             const std::uint32_t a = parse_reg8(inst.args[0], "operand A");
             const std::uint32_t b = parse_reg8(inst.args[1], "operand B");
+            if (op == suru::vm::Op::Call) {
+                return pack_abc_i(op, a, b, parse_return_count(inst.args[2]), false);
+            }
             if (is_immediate(inst.args[2])) {
                 if (!immediate_enabled_abc(op)) {
                     throw AsmError(inst.line, "immediate is not supported for this opcode");

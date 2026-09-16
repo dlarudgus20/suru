@@ -10,14 +10,14 @@
 - 같은 주제(예: 에러 체계, 문서 경로 변경)는 가장 최근 항목 하나만 유지하고 이전 항목은 요약/정리한다.
 
 ## 2026-09-16
-- VM vararg/multret 구현: `.chunk name @va slots`, `CALL.v F retc`, `RETURN.v A`, `VARGPREP n`, `VARG A count`, `VARG.v A`, CALL retc=511.
+- VM vararg/multret 구현: `.chunk name @va slots`, `CALL.v F retc`, `RETURN.v A`, `VARGPREP n`, `VARG A count`, `VARG.v A`. assembler의 multret 표기는 `@vret`이고 C=511로 인코딩한다.
 - base는 closure 슬롯이며 반환 정보는 callee의 return_base/retc로 통합했다. frame_start는 반복 prep 이전 슬롯의 수명/정리 경계다.
 - VARGPREP의 첫 명령/1회 실행 제한은 의도적으로 없다. 현재 인수열을 재해석하며, 기존 upvalue는 원래 슬롯에 남는다.
 - SBC는 현재 형식만 읽고 쓰며 개발 중 만들어진 이전 이미지의 호환 변환은 제공하지 않는다.
 - `PUSHARRAYX A B count`와 `PUSHARRAYX.v A B`는 배열 끝에 고정/open 레지스터열을 추가하며 top은 유지한다.
 - `CLOSE A`는 현재 register bank의 `[R[A], R[slots])`에 열린 upvalue를 닫는다. `A == slots`는 빈 범위다.
 - 범위 제외: source codegen.
-- 검증: CTest 16개 통과, VM GTest 43개(인수 조합 117개 포함), CLI 회귀 7개. ASan/UBSan도 동일하게 통과했다. 실행 환경 제한으로 LeakSanitizer는 제외했다.
+- 검증: CTest 16개 통과, VM GTest 43개(인수 조합 117개 포함), CLI 회귀 8개. ASan/UBSan도 동일하게 통과했다. 실행 환경 제한으로 LeakSanitizer는 제외했다.
 
 ## 2026-02-27 #3
 - `suru-bc`에 `-o <out.sbc> <in.sura>` 옵션이 추가되었다.

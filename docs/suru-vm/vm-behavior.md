@@ -31,7 +31,7 @@ closure를 제거하지 않으며, caller의 원래 레지스터는 호출 중 �
 두 경우 모두 고정 레지스터 slots만큼 물리 공간을 확보한다.
 
 `CALL.v F retc`는 R[F+1]부터 top까지 전달한다.
-고정 retc는 결과를 절단하거나 nil로 보충하며, 511이면 전부 받는다.
+고정 retc는 결과를 절단하거나 nil로 보충한다. assembler의 `@vret`은 C=511로 인코딩되어 전부 받는다.
 반환 후 caller.top은 결과의 끝이다. retc=0은 결과 슬롯을 덮어쓰지 않는다.
 일반 register 쓰기 및 고정 VARG는 top을 바꾸지 않는다.
 
@@ -71,7 +71,7 @@ prep이 레지스터를 옮겨도 기존 upvalue는 옛 슬롯을 계속 참조�
 - `getlocal(uint32_t)`와 `stack_top()`은 C/API 프레임의 보이는 값을 조회한다.
 - `push_value()`로 결과를 추가한다. 기존처럼 C 함수 진입 당시 물리 끝 이후가 결과다.
 - C 함수가 진입 당시 끝보다 스택을 줄였다면 남은 visible stack을 결과로 취급한다.
-- `call(uint32_t argc, uint16_t retc)`는 재진입 가능하고 retc=511도 지원한다.
+- `call(uint32_t argc, uint16_t retc)`는 재진입 가능하고 API에서는 `VM::multret`으로 전체 반환을 요청한다.
 - `pop_value()`는 현재 closure 슬롯을 제거할 수 없고 제거되는 슬롯의 upvalue를 먼저 닫는다.
 - API 호출에서 예외가 나면 그 호출의 프레임과 슬롯을 정리하고 예외를 다시 던진다.
 - 인덱스 한계 초과는 StackOverflowError, 잘못된 bytecode 범위는 InvalidCodeError다.

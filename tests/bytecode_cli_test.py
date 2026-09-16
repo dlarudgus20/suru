@@ -51,6 +51,20 @@ class BytecodeCliTest(unittest.TestCase):
             with self.subTest(instruction=instruction):
                 self.run_source(".chunk main 0 0\n" + instruction + "\n", False)
 
+    def test_multret_syntax(self):
+        source = '''.chunk main 0 1
+CLOSURE 0 empty
+CALL 0 0 @vret
+RETURN.v 0
+.chunk empty 0 0
+RETURN 0 0
+'''
+        self.run_source(source)
+        for instruction in ("CALL 0 0 511", "CALL.v 0 511",
+                            "CALL 0 0 0x1ff", "CALL.v 0 0x1ff"):
+            with self.subTest(instruction=instruction):
+                self.run_source(".chunk main 0 1\n" + instruction + "\n", False)
+
     def test_nonzero_result_contract_and_zero_varargs(self):
         source = '''.const
 k_print = string "print"
@@ -76,7 +90,7 @@ LOAD 1 #10
 LOAD 2 #20
 PUSHARRAYX 0 1 2
 CLOSURE 1 values
-CALL 1 0 511
+CALL 1 0 @vret
 PUSHARRAYX.v 0 1
 LEN 4 0
 GETGLOBALK k_print 3
