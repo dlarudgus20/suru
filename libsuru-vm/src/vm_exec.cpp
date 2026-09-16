@@ -1,5 +1,6 @@
 #include "suru/vm/vm.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -152,174 +153,127 @@ std::size_t resolve_array_index(std::size_t len, Value value) {
 
 } // namespace
 
-Value VM::reg_read(std::uint32_t index) const {
-    const CallFrame& frame = i_stack_.back();
-    const std::uint32_t base = frame.base;
-    const std::uint32_t limit = checked_u32_stack_index(v_stack_.size(), "frame limit");
-    const std::uint32_t at32 = base + index;
-    if (at32 >= limit) {
-        throw InvalidCodeError("register index out of bounds");
+Closure* VM::frame_closure() const {
+    if (i_stack_.size() <= 1) {
+        return nullptr; // sentinel has no function slot
     }
-    const std::size_t at = static_cast<std::size_t>(at32);
-    if (at >= v_stack_.size()) {
-        throw InvalidCodeError("register read out of stack bounds");
+    return v_stack_.at(i_stack_.back().base).as_closure("current frame");
+}
+
+std::uint32_t VM::reg_limit() const {
+    const CallFrame& frame = i_stack_.back();
+    const Closure* closure = frame_closure();
+    return checked_u32_stack_index(
+        static_cast<std::size_t>(frame.base) + 1U
+            + closure->code->chunks_[closure->chunk_index].slots, "register limit");
+}
+
+Value VM::reg_read(std::uint32_t index) const {
+    const std::size_t at = static_cast<std::size_t>(i_stack_.back().base) + 1U + index;
+    if (at >= reg_limit() || at >= v_stack_.size()) {
+        throw InvalidCodeError("register index out of bounds");
     }
     return v_stack_[at];
 }
 
 void VM::reg_write(std::uint32_t index, Value value) {
-    const CallFrame& frame = i_stack_.back();
-    const std::uint32_t base = frame.base;
-    const std::uint32_t limit = checked_u32_stack_index(v_stack_.size(), "frame limit");
-    const std::uint32_t at32 = base + index;
-    if (at32 >= limit) {
+    const std::size_t at = static_cast<std::size_t>(i_stack_.back().base) + 1U + index;
+    if (at >= reg_limit() || at >= v_stack_.size()) {
         throw InvalidCodeError("register index out of bounds");
-    }
-    const std::size_t at = static_cast<std::size_t>(at32);
-    if (at >= v_stack_.size()) {
-        throw InvalidCodeError("register write out of stack bounds");
     }
     v_stack_[at] = value;
 }
 
-void VM::finish_frame_return(
-    std::uint32_t frame_base,
-    std::uint8_t expected,
-    std::uint32_t result_begin,
-    std::uint32_t result_end
-) {
-    if (result_begin > result_end || static_cast<std::size_t>(result_end) > v_stack_.size()) {
-        throw InvalidImageError("invalid return result range");
+void VM::finish_frame_return(std::uint32_t result_begin, std::uint32_t result_end) {
+    const CallFrame finished = i_stack_.back();
+    if (result_begin > result_end || result_end > v_stack_.size()
+        || result_begin < finished.base + 1U) {
+        throw InvalidCodeError("invalid return result range");
     }
-
-    CallFrame& caller = i_stack_.back();
     const std::uint32_t available = result_end - result_begin;
-    const std::uint8_t emit = (available < expected) ? static_cast<std::uint8_t>(available) : expected;
+    const std::uint32_t expected = finished.retc == multret ? available : finished.retc;
+    const std::uint32_t emit = std::min(available, expected);
+    const auto result_top = checked_u32_stack_index(
+        static_cast<std::size_t>(finished.return_base) + expected, "return top");
 
-    if (caller.closure != nullptr && caller.closure->code != nullptr) {
-        if (caller.call_retc != expected) {
-            throw InternalError("call return count mismatch");
-        }
-        const std::uint32_t caller_limit = frame_base;
-        if (caller.base + caller.call_dst + expected > caller_limit) {
-            throw InvalidCodeError("call return range out of bounds");
-        }
-        for (std::uint8_t i = 0; i < emit; ++i) {
-            const std::uint32_t at32 = caller.base + caller.call_dst + i;
-            if (at32 >= caller_limit || static_cast<std::size_t>(at32) >= v_stack_.size()) {
-                throw InvalidCodeError("call return range out of bounds");
-            }
-            v_stack_[at32] = v_stack_[result_begin + i];
-        }
-        for (std::uint8_t i = emit; i < expected; ++i) {
-            const std::uint32_t at32 = caller.base + caller.call_dst + i;
-            if (at32 >= caller_limit || static_cast<std::size_t>(at32) >= v_stack_.size()) {
-                throw InvalidCodeError("call return range out of bounds");
-            }
-            v_stack_[at32] = Value::nil();
-        }
-        v_stack_.resize(frame_base);
-        caller.call_dst = 0;
-        caller.call_retc = 0;
-        return;
+    // The destination is below the callee's arguments. Forward copying is safe
+    // even when a large result list overlaps its source. Grow before dropping
+    // the frame so an allocation failure can still unwind it normally.
+    v_stack_.resize(std::max(v_stack_.size(), static_cast<std::size_t>(result_top)), Value::nil());
+    close_upvalues(finished.frame_start);
+    i_stack_.pop_back();
+    const Closure* caller = frame_closure();
+    const bool bytecode_caller = caller != nullptr && caller->code != nullptr;
+    // Keep the caller's physical register/old-prep regions, independently of top.
+    const std::size_t retained = bytecode_caller ? finished.frame_start : finished.return_base;
+    for (std::uint32_t i = 0; i < expected; ++i) {
+        v_stack_[finished.return_base + i] = i < emit ? v_stack_[result_begin + i] : Value::nil();
     }
-
-    for (std::uint8_t i = 0; i < emit; ++i) {
-        v_stack_[frame_base + i] = v_stack_[result_begin + i];
-    }
-    v_stack_.resize(frame_base + expected);
-    for (std::uint8_t i = emit; i < expected; ++i) {
-        v_stack_[frame_base + i] = Value::nil();
-    }
+    v_stack_.resize(std::max(retained, static_cast<std::size_t>(result_top)));
+    i_stack_.back().top = result_top;
 }
 
-void VM::make_call_frame(std::uint8_t arg_count, std::uint8_t ret_slots) {
+void VM::make_call_frame(std::uint32_t arg_count, std::uint16_t retc,
+                          std::uint32_t return_base) {
+    if (retc > multret) {
+        throw ApiError("return count out of bounds");
+    }
     if (v_stack_.size() < static_cast<std::size_t>(arg_count) + 1U) {
         throw InvalidCodeError("call stack underflow");
     }
-
-    const std::size_t callee_index = v_stack_.size() - static_cast<std::size_t>(arg_count) - 1U;
-    Closure* callee = v_stack_[callee_index].as_closure("call");
-
-    if (callee->code == nullptr) {
-        for (std::uint8_t i = 0; i < arg_count; ++i) {
-            v_stack_[callee_index + i] = v_stack_[callee_index + 1U + i];
+    const auto start = checked_u32_stack_index(
+        v_stack_.size() - static_cast<std::size_t>(arg_count) - 1U, "frame start");
+    const std::size_t caller_begin = i_stack_.size() == 1
+        ? 0 : static_cast<std::size_t>(i_stack_.back().base) + 1U;
+    if (start < caller_begin) {
+        throw InvalidCodeError("call crosses caller frame boundary");
+    }
+    Closure* callee = v_stack_[start].as_closure("call");
+    CallFrame frame {};
+    frame.frame_start = frame.base = start;
+    frame.top = checked_u32_stack_index(v_stack_.size(), "argument top");
+    frame.return_base = return_base;
+    frame.retc = retc;
+    if (callee->code != nullptr) {
+        if (callee->chunk_index >= callee->code->chunks_.size()) {
+            throw InvalidImageError("callee chunk index out of bounds");
         }
-        v_stack_.resize(v_stack_.size() - 1U);
-        i_stack_.push_back(CallFrame {callee, 0, checked_u32_stack_index(callee_index, "frame base"), 0, ret_slots, 0, 0});
-        return;
+        const Chunk& chunk = callee->code->chunks_[callee->chunk_index];
+        if ((chunk.arity != 255 && chunk.arity > chunk.slots)
+            || chunk.code_begin > chunk.code_end || chunk.code_end > callee->code->code_.size()) {
+            throw InvalidImageError("invalid chunk bounds");
+        }
+        const std::uint32_t kept = chunk.arity == 255 ? arg_count : std::min(arg_count, std::uint32_t(chunk.arity));
+        const std::uint32_t logical = chunk.arity == 255 ? arg_count : chunk.arity;
+        frame.top = checked_u32_stack_index(static_cast<std::size_t>(start) + 1U + logical, "argument top");
+        const auto size = checked_u32_stack_index(static_cast<std::size_t>(start) + 1U
+            + std::max(logical, std::uint32_t(chunk.slots)), "frame extent");
+        v_stack_.resize(static_cast<std::size_t>(start) + 1U + kept);
+        v_stack_.resize(size, Value::nil());
+        frame.pc = chunk.code_begin;
+        frame.code_end = chunk.code_end;
     }
-
-    if (callee->chunk_index >= callee->code->chunks_.size()) {
-        throw InvalidImageError("callee chunk index out of bounds");
-    }
-    const Chunk& callee_chunk = callee->code->chunks_[callee->chunk_index];
-    if (callee_chunk.arity > callee_chunk.slots) {
-        throw InvalidImageError("chunk arity exceeds slots");
-    }
-
-    const std::uint8_t copied = (arg_count < callee_chunk.arity) ? arg_count : callee_chunk.arity;
-    for (std::uint8_t i = 0; i < copied; ++i) {
-        v_stack_[callee_index + i] = v_stack_[callee_index + 1U + i];
-    }
-
-    const std::size_t new_size = callee_index + static_cast<std::size_t>(callee_chunk.slots);
-    const std::size_t clear_end = (new_size < v_stack_.size()) ? new_size : v_stack_.size();
-    for (std::size_t at = callee_index + static_cast<std::size_t>(copied); at < clear_end; ++at) {
-        v_stack_[at] = Value::nil();
-    }
-    v_stack_.resize(new_size, Value::nil());
-
-    i_stack_.push_back(CallFrame {
-        callee,
-        callee_chunk.code_begin,
-        checked_u32_stack_index(callee_index, "frame base"),
-        callee_chunk.code_end,
-        ret_slots,
-        0,
-        0,
-    });
+    i_stack_.push_back(frame);
 }
 
 void VM::run_c_frame() {
-    Closure* current = i_stack_.back().closure;
-    if (current == nullptr || current->code != nullptr) {
-        throw InternalError("run_c_frame called with non-c frame");
+    Closure* current = frame_closure();
+    if (current == nullptr || current->code != nullptr || current->cfunc == nullptr) {
+        throw InternalError("invalid C frame");
     }
-    if (current->cfunc == nullptr) {
-        throw InternalError("c closure has null function");
-    }
-
-    const std::uint32_t frame_base = i_stack_.back().base;
-    const std::uint8_t expected = i_stack_.back().ret_slots;
+    const std::uint32_t reg_begin = i_stack_.back().base + 1U;
     const std::size_t produced_base = v_stack_.size();
-
     current->cfunc(this);
-
-    if (v_stack_.size() < frame_base) {
-        throw InvalidCodeError("frame stack underflow");
-    }
-
-    std::size_t result_begin = produced_base;
-    if (v_stack_.size() < produced_base) {
-        result_begin = frame_base;
-    }
-
-    const std::size_t result_end = v_stack_.size();
-    i_stack_.pop_back();
-    close_upvalues(frame_base);
+    const auto result_begin = v_stack_.size() < produced_base ? reg_begin : produced_base;
     finish_frame_return(
-        frame_base,
-        expected,
         checked_u32_stack_index(result_begin, "result begin"),
-        checked_u32_stack_index(result_end, "result end")
-    );
+        checked_u32_stack_index(v_stack_.size(), "result end"));
 }
 
 void VM::run(std::size_t target_depth) {
     while (i_stack_.size() > target_depth) {
         CallFrame& frame = i_stack_.back();
-        Closure* current = frame.closure;
+        Closure* current = frame_closure();
         if (current == nullptr) {
             throw InternalError("invalid target depth");
         }
@@ -330,7 +284,7 @@ void VM::run(std::size_t target_depth) {
         }
 
         CodeUnit* cu = current->code;
-        const std::uint32_t frame_limit = checked_u32_stack_index(v_stack_.size(), "frame limit");
+        const std::uint32_t frame_limit = reg_limit();
         if (frame.pc >= frame.code_end) {
             throw InternalError("unexpected end of chunk");
         }
@@ -776,30 +730,85 @@ void VM::run(std::size_t target_depth) {
             }
             case Op::Call: {
                 const auto w = decode_abc(word);
-                const std::uint32_t f = w.a;
-                const std::uint32_t arg_count = w.b;
-                const std::uint32_t ret_count = w.c;
-                const std::uint32_t avail = frame_limit - frame.base;
-                if (f >= avail) {
-                    throw InvalidCodeError("call register index out of bounds");
+                const std::uint32_t reg_begin = frame.base + 1U;
+                const std::uint32_t avail = frame_limit - reg_begin;
+                if (w.a >= avail || (!w.i && w.a + 1U + w.b > avail)
+                    || (w.c != multret && w.a + w.c > avail)) {
+                    throw InvalidCodeError("call register range out of bounds");
                 }
-                if (f + 1U + arg_count > avail) {
-                    throw InvalidCodeError("call argument range out of bounds");
+                const auto first_arg = reg_begin + w.a + 1U;
+                if (w.i && (frame.top < first_arg || frame.top > v_stack_.size())) {
+                    throw InvalidCodeError("invalid open argument range");
                 }
-                if (f + ret_count > avail) {
-                    throw InvalidCodeError("call return range out of bounds");
+                const auto argc = w.i ? frame.top - first_arg : w.b;
+                const auto destination = reg_begin + w.a;
+                const auto append_begin = checked_u32_stack_index(v_stack_.size(), "call frame start");
+                checked_u32_stack_index(static_cast<std::size_t>(append_begin) + 1U + argc, "call extent");
+                // Read by absolute index; vector reallocation must not invalidate sources.
+                v_stack_.push_back(v_stack_[destination]);
+                for (std::uint32_t i = 0; i < argc; ++i) {
+                    v_stack_.push_back(v_stack_[first_arg + i]);
                 }
-                if (ret_count > std::numeric_limits<std::uint8_t>::max()) {
-                    throw InvalidCodeError("call return count out of bounds");
+                make_call_frame(argc, static_cast<std::uint16_t>(w.c), destination);
+                break;
+            }
+            case Op::VargPrep: {
+                const auto n = decode_abx(word).a;
+                const auto old_base = frame.base;
+                const auto reg_begin = old_base + 1U;
+                if (n > frame_limit - reg_begin || frame.top < reg_begin || frame.top > v_stack_.size()) {
+                    throw InvalidCodeError("invalid vargprep range");
                 }
-
-                frame.call_dst = static_cast<std::uint8_t>(f);
-                frame.call_retc = static_cast<std::uint8_t>(ret_count);
-                v_stack_.push_back(reg_read(f));
-                for (std::uint32_t i = 0; i < arg_count; ++i) {
-                    v_stack_.push_back(reg_read(f + 1U + i));
+                const auto actual = frame.top - reg_begin;
+                const auto extra = actual > n ? actual - n : 0U;
+                const auto copied = std::min(actual, n);
+                const Value function = v_stack_[old_base];
+                // Never place a function slot over an old register: an open upvalue
+                // may still refer to it after delayed or repeated preparation.
+                const auto padded_top = checked_u32_stack_index(
+                    static_cast<std::size_t>(reg_begin) + std::max(actual, n), "vargprep input");
+                const auto extent = std::max(v_stack_.size(), static_cast<std::size_t>(padded_top));
+                const bool reuse_extras = extent == padded_top;
+                const auto new_base = checked_u32_stack_index(
+                    extent + (reuse_extras ? 0U : extra), "vargprep base");
+                const auto new_end = checked_u32_stack_index(
+                    static_cast<std::size_t>(new_base) + 1U + (frame_limit - reg_begin), "vargprep extent");
+                v_stack_.resize(new_end, Value::nil());
+                if (!reuse_extras) {
+                    for (std::uint32_t i = 0; i < extra; ++i) {
+                        v_stack_[new_base - extra + i] = v_stack_[reg_begin + n + i];
+                    }
                 }
-                make_call_frame(static_cast<std::uint8_t>(arg_count), static_cast<std::uint8_t>(ret_count));
+                v_stack_[new_base] = function;
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    v_stack_[new_base + 1U + i] = i < copied ? v_stack_[reg_begin + i] : Value::nil();
+                    v_stack_[reg_begin + i] = Value::nil();
+                }
+                frame.base = new_base;
+                frame.nextra = extra;
+                frame.top = new_base + 1U + n;
+                break;
+            }
+            case Op::Varg: {
+                const auto w = decode_abx(word);
+                const auto reg_begin = frame.base + 1U;
+                const auto slots = frame_limit - reg_begin;
+                const auto count = w.i ? frame.nextra : w.bx;
+                // An empty/open list may begin at the end of the fixed namespace.
+                if (w.a > slots || (!w.i && w.bx > slots - w.a)) {
+                    throw InvalidCodeError("varg destination out of bounds");
+                }
+                const auto destination = reg_begin + w.a;
+                const auto end = checked_u32_stack_index(
+                    static_cast<std::size_t>(destination) + count, "varg top");
+                v_stack_.resize(std::max(v_stack_.size(), static_cast<std::size_t>(end)), Value::nil());
+                for (std::uint32_t i = 0; i < count; ++i) {
+                    v_stack_[destination + i] = i < frame.nextra
+                        ? v_stack_[frame.base - frame.nextra + i] : Value::nil();
+                }
+                if (w.i) {
+                    frame.top = end;
+                }
                 break;
             }
             case Op::Closure: {
@@ -812,10 +821,10 @@ void VM::run(std::size_t target_depth) {
                 for (std::uint8_t i = 0; i < closure->len; ++i) {
                     const UpvalueInfo info = chunk.upvalue_infos[i];
                     if (info.source == UpvalueSource::Local) {
-                        const std::uint32_t abs_slot = frame.base + info.index;
-                        if (abs_slot >= frame_limit) {
+                        if (info.index >= frame_limit - (frame.base + 1U)) {
                             throw InvalidCodeError("upvalue capture register range out of bounds");
                         }
+                        const std::uint32_t abs_slot = frame.base + 1U + info.index;
                         closure->at(i) = capture_upvalue(abs_slot);
                         continue;
                     }
@@ -876,17 +885,14 @@ void VM::run(std::size_t target_depth) {
             }
             case Op::Return: {
                 const auto w = decode_abx(word);
-                if (frame.base + w.a + w.bx > frame_limit) {
+                const auto reg_begin = frame.base + 1U;
+                const auto slots = frame_limit - reg_begin;
+                if (w.a > slots || (!w.i && w.bx > slots - w.a)) {
                     throw InvalidCodeError("return register range out of bounds");
                 }
-
-                const std::uint32_t frame_base = frame.base;
-                const std::uint8_t expected = frame.ret_slots;
-                const std::uint32_t result_begin = frame_base + w.a;
-                const std::uint32_t result_end = result_begin + w.bx;
-                i_stack_.pop_back();
-                close_upvalues(frame_base);
-                finish_frame_return(frame_base, expected, result_begin, result_end);
+                const auto result_begin = reg_begin + w.a;
+                const auto result_end = w.i ? frame.top : result_begin + w.bx;
+                finish_frame_return(result_begin, result_end);
                 break;
             }
             default:
@@ -895,14 +901,27 @@ void VM::run(std::size_t target_depth) {
     }
 }
 
-void VM::call(std::uint8_t arg_count, std::uint8_t ret_slots) {
+void VM::call(std::uint32_t arg_count, std::uint16_t retc) {
     if (i_stack_.empty()) {
         throw InternalError("call stack is not initialized");
     }
 
     const std::size_t caller_depth = i_stack_.size();
-    make_call_frame(arg_count, ret_slots);
-    run(caller_depth);
+    if (stack_top() < static_cast<std::size_t>(arg_count) + 1U) {
+        throw ApiError("call stack underflow");
+    }
+    const auto start = checked_u32_stack_index(v_stack_.size() - arg_count - 1U, "API call start");
+    const auto saved_top = i_stack_.back().top;
+    try {
+        make_call_frame(arg_count, retc, start);
+        run(caller_depth);
+    } catch (...) {
+        close_upvalues(start);
+        i_stack_.resize(caller_depth);
+        v_stack_.resize(start);
+        i_stack_.back().top = std::min(saved_top, start);
+        throw;
+    }
 }
 
 } // namespace suru::vm

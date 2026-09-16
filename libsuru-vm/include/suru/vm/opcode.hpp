@@ -68,7 +68,8 @@ enum class Op : std::uint8_t {
     SetGlobal = 52,
     GetArrayI = 53,
     SetArrayI = 54,
+    VargPrep = 55,
+    Varg = 56,
 };
 
 } // namespace suru::vm
-

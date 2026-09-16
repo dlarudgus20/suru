@@ -14,13 +14,13 @@ Opcode 인코딩/명령별 스택 동작은 `docs/suru-vm/bytecode.md`에서 다
 - `VM`: 힙 객체, 전역 테이블, 실행 스택을 소유한다.
 - `CodeUnit`: `constants_`, `code_`, `chunks_`를 담는다.
 - `Chunk`: 실행 가능한 코드 구간과 프레임 슬롯 크기(`slots`)를 정의한다.
-- `CallFrame`: 현재 실행 중인 클로저, PC, 프레임 base, 반환 기대 개수를 보관한다.
+- `CallFrame`: PC, 원래 영역 시작, closure 슬롯 base, 논리 top, extra 개수, 반환 목적지와 기대 개수를 보관한다.
 
 ## 실행 수명주기
-1. 엔트리 클로저를 value stack에서 꺼내 실행 시작
+1. 엔트리 클로저를 value stack에 유지하며 실행 시작
 2. 엔트리 `Chunk`의 `slots` 크기만큼 프레임 슬롯 확보
 3. opcode fetch/dispatch 루프 실행
-4. `RETURN` 또는 코드 끝 도달 시 프레임 정리
+4. `RETURN` 시 프레임 전체의 upvalue를 닫고 정리 (RETURN 없는 코드 끝 도달은 오류)
 5. 최상위 프레임 종료 시 실행 완료
 
 ## 값 모델

@@ -26,7 +26,7 @@ constexpr std::uint32_t kIShift = 25U;
 constexpr std::uint32_t kIMask = 0x1U;
 constexpr std::uint32_t kAxMask = 0x1FFFFFFU;
 constexpr std::uint32_t kSbcMagic = 0x43425300U; // "\0SBC" in little-endian bytes
-constexpr std::uint32_t kSbcVersion = 1U;
+constexpr std::uint32_t kSbcVersion = 2U;
 
 struct CompiledUnit {
     suru::vm::CodeUnit* code {nullptr};
@@ -321,6 +321,8 @@ suru::vm::Op parse_op(std::string_view op, int line) {
         {"IFGE", suru::vm::Op::IfGe},
         {"CALL", suru::vm::Op::Call},
         {"RETURN", suru::vm::Op::Return},
+        {"VARGPREP", suru::vm::Op::VargPrep},
+        {"VARG", suru::vm::Op::Varg},
         {"CLOSURE", suru::vm::Op::Closure},
         {"GETUPVAL", suru::vm::Op::GetUpvalue},
         {"SETUPVAL", suru::vm::Op::SetUpvalue},
@@ -353,7 +355,21 @@ std::uint32_t emit_word(
     const std::unordered_map<std::string, std::uint32_t>& const_index,
     const std::unordered_map<std::string, std::uint32_t>& chunk_index
 ) {
-    const suru::vm::Op op = parse_op(inst.op, inst.line);
+    const bool open = inst.op.ends_with(".v");
+    const std::string_view name = inst.op;
+    const suru::vm::Op op = parse_op(open ? name.substr(0, name.size() - 2U) : name, inst.line);
+    if (open) {
+        if (op == suru::vm::Op::Call && inst.args.size() == 2) {
+            return pack_abc_i(op,
+                checked_u8(parse_u64(inst.args[0], inst.line, "register"), inst.line, "register"), 0,
+                checked_u9(parse_u64(inst.args[1], inst.line, "return count"), inst.line, "return count"), true);
+        }
+        if ((op == suru::vm::Op::Return || op == suru::vm::Op::Varg) && inst.args.size() == 1) {
+            return pack_abx(op,
+                checked_u8(parse_u64(inst.args[0], inst.line, "register"), inst.line, "register"), 0, true);
+        }
+        throw AsmError(inst.line, "expected CALL.v F retc, RETURN.v A, or VARG.v A");
+    }
 
     auto is_immediate = [](std::string_view tok) {
         return !tok.empty() && tok.front() == '#';
@@ -615,9 +631,16 @@ std::uint32_t emit_word(
             }
             return pack_abc_i(op, 0, b, parse_reg9(inst.args[1], "operand C"), false);
         }
+        case suru::vm::Op::VargPrep: {
+            if (inst.args.size() != 1) {
+                throw AsmError(inst.line, "VARGPREP requires one operand");
+            }
+            return pack_abx(op, parse_reg8(inst.args[0], "fixed count"), 0);
+        }
+        case suru::vm::Op::Varg:
         case suru::vm::Op::Return: {
             if (inst.args.size() != 2) {
-                throw AsmError(inst.line, "RETURN requires two operands");
+                throw AsmError(inst.line, "opcode requires two operands");
             }
             return pack_abx(op, parse_reg8(inst.args[0], "register"), checked_u18(parse_u64(inst.args[1], inst.line, "return count"), inst.line, "return count"));
         }
@@ -838,9 +861,13 @@ CompiledUnit assemble_file(suru::vm::VM& vm, const std::filesystem::path& path) 
             }
             ChunkDef chunk;
             chunk.name = parts[1];
-            chunk.arity = checked_u8(parse_u64(parts[2], line_no, "arity"), line_no, "arity");
+            chunk.arity = parts[2] == "@va" ? 255
+                : checked_u8(parse_u64(parts[2], line_no, "arity"), line_no, "arity");
+            if (parts[2] != "@va" && chunk.arity == 255) {
+                throw AsmError(line_no, "numeric arity must be <= 254; use @va for varargs");
+            }
             chunk.slots = checked_u8(parse_u64(parts[3], line_no, "slots"), line_no, "slots");
-            if (chunk.arity > chunk.slots) {
+            if (chunk.arity != 255 && chunk.arity > chunk.slots) {
                 throw AsmError(line_no, "chunk arity must be <= slots");
             }
             chunk_defs.push_back(std::move(chunk));
@@ -1076,7 +1103,7 @@ CompiledUnit load_sbc_file(suru::vm::VM& vm, const std::filesystem::path& path) 
         throw std::runtime_error("invalid sbc magic");
     }
     const std::uint32_t version = rd.read_u32();
-    if (version != kSbcVersion) {
+    if (version != 1U && version != kSbcVersion) {
         throw std::runtime_error("unsupported sbc version");
     }
 
@@ -1143,7 +1170,7 @@ CompiledUnit load_sbc_file(suru::vm::VM& vm, const std::filesystem::path& path) 
         throw std::runtime_error("entry chunk index out of bounds");
     }
     for (const suru::vm::Chunk& chunk : cu->chunks_) {
-        if (chunk.arity > chunk.slots) {
+        if ((version == 1U || chunk.arity != 255) && chunk.arity > chunk.slots) {
             throw std::runtime_error("chunk arity exceeds slots");
         }
         if (chunk.code_begin > chunk.code_end || chunk.code_end > code_word_count) {
@@ -1151,6 +1178,28 @@ CompiledUnit load_sbc_file(suru::vm::VM& vm, const std::filesystem::path& path) 
         }
     }
 
+    if (version == 1U) {
+        for (auto& word : cu->code_) {
+            const auto op = static_cast<suru::vm::Op>(word >> kOpShift);
+            if (static_cast<std::uint32_t>(op) > static_cast<std::uint32_t>(suru::vm::Op::SetArrayI)) {
+                throw std::runtime_error("unsupported opcode in sbc version 1");
+            }
+            if (op == suru::vm::Op::Call || op == suru::vm::Op::Return) {
+                word &= ~(1U << kIShift); // ignored by v1, now the open-list flag
+            }
+        }
+        for (auto& chunk : cu->chunks_) {
+            if (chunk.arity == 255) {
+                // v1 used 255 as a fixed arity. Give its unchanged body a prep prologue.
+                const std::vector<std::uint32_t> body(cu->code_.begin() + chunk.code_begin,
+                                                       cu->code_.begin() + chunk.code_end);
+                chunk.code_begin = checked_u32(cu->code_.size(), 0, "code size");
+                cu->code_.push_back(pack_abx(suru::vm::Op::VargPrep, 255, 0));
+                cu->code_.insert(cu->code_.end(), body.begin(), body.end());
+                chunk.code_end = checked_u32(cu->code_.size(), 0, "code size");
+            }
+        }
+    }
     return CompiledUnit {cu, entry_chunk_index};
 }
 

@@ -22,7 +22,8 @@ public:
     VM(VM&&) = delete;
     VM& operator=(VM&&) = delete;
 
-    void call(std::uint8_t arg_count, std::uint8_t ret_slots);
+    static constexpr std::uint16_t multret = 0x1ff;
+    void call(std::uint32_t arg_count, std::uint16_t retc);
 
     [[nodiscard]] String* make_string(std::string_view text);
     [[nodiscard]] Array* make_array(std::size_t len);
@@ -38,18 +39,19 @@ public:
     void push_value(Value value);
 
     [[nodiscard]] std::size_t stack_top() const;
-    [[nodiscard]] Value getlocal(std::uint8_t index) const;
+    [[nodiscard]] Value getlocal(std::uint32_t index) const;
     [[nodiscard]] Value getupvalue(std::uint8_t index) const;
 
 private:
     struct CallFrame {
-        Closure* closure {nullptr};
         std::uint32_t pc {0};
+        std::uint32_t frame_start {0};
         std::uint32_t base {0};
+        std::uint32_t top {0};
+        std::uint32_t nextra {0};
         std::uint32_t code_end {0};
-        std::uint8_t ret_slots {0};
-        std::uint8_t call_dst {0};
-        std::uint8_t call_retc {0};
+        std::uint32_t return_base {0};
+        std::uint16_t retc {0};
     };
 
     template <typename T>
@@ -69,10 +71,10 @@ private:
     std::vector<CallFrame> i_stack_;
     Upvalue* open_upvalues_ {nullptr};
 
-    void make_call_frame(std::uint8_t arg_count, std::uint8_t ret_slots);
+    [[nodiscard]] Closure* frame_closure() const;
+    [[nodiscard]] std::uint32_t reg_limit() const;
+    void make_call_frame(std::uint32_t arg_count, std::uint16_t retc, std::uint32_t return_base);
     void finish_frame_return(
-        std::uint32_t frame_base,
-        std::uint8_t expected,
         std::uint32_t result_begin,
         std::uint32_t result_end
     );

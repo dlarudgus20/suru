@@ -1,0 +1,28 @@
+.const
+k_print = string "print"
+
+.chunk main 0 5
+GETGLOBALK k_print 0
+CLOSURE 1 forward
+LOAD 2 #10
+LOAD 3 #20
+LOAD 4 #30
+CALL 1 3 511
+CALL.v 0 0
+RETURN 0 0
+
+.chunk forward @va 4
+VARGPREP 1
+CLOSURE 1 echo
+LOAD 2 0
+VARG.v 3
+CALL.v 1 511
+RETURN.v 1
+
+.chunk echo @va 3
+LOAD 0 #99
+VARGPREP 1
+VARG.v 1
+VARGPREP 2
+VARG.v 2
+RETURN.v 0

@@ -28,9 +28,33 @@
   - callee: `R[F]`
   - 인자: `R[F+1] .. R[F+argc]`
   - 결과 저장: `R[F] .. R[F+retc-1]`
+- `CALL.v F retc`: argc 필드를 무시하고 `R[F+1]`부터 동적 `top` 직전까지 전달한다.
+- `retc=511` (`0x1ff`): 결과를 전부 받는다. 그 외에는 고정 개수로 절단/`nil` 보충한다.
+- CALL 반환 후 `top`은 결과 범위의 끝이다. 일반 레지스터 쓰기는 `top`을 바꾸지 않는다.
+- `RETURN.v A`: `R[A]`부터 `top` 직전까지 반환한다.
+- `.v`는 `i` 비트를 재사용한다. 생략된 필드는 assembler가 0으로 인코딩하며 VM은 무시한다.
+- `top`은 절대 스택 인덱스이며 고정 레지스터 할당 끝과 별개다.
+- open 값은 `slots` 바깥까지 확장될 수 있지만 일반 register operand의 범위를 확장하지 않는다.
 - 바이트코드 함수는 `chunk.arity` 기준으로 인자를 받는다.
   - 부족한 인자: `nil`로 채움
   - 초과한 인자: 무시
+  - 예외: `arity=255` (`@va`)는 모든 인자를 보존한다. 고정 인수 개수는 메타데이터에 없다.
+
+## Vararg 명령
+
+- `VARGPREP n` (`ABx`, A=n): 현재 `[base+1, top)`을 인수열로 해석해 재배치한다.
+  - `n <= slots`, 부족한 고정 인수는 `nil`, `nextra=max(actual-n,0)`.
+  - closure와 고정 인수를 새 레지스터 영역으로 복사하고 옛 고정 인수 슬롯은 `nil`로 만든다.
+  - `base`는 새 closure 슬롯, `R[i]=stack[base+1+i]`, `top=base+1+n`.
+  - hidden vararg는 `[base-nextra, base)`에 위치한다.
+  - 첫 명령/1회 실행 제한이 없다. 숫자 arity chunk에서도 실행 가능하다.
+  - 기존 hidden vararg를 자동 합치지 않는다. 반복 실행은 현재 인수열로 `nextra`를 대체한다.
+  - 이전 슬롯의 upvalue는 이동하지 않는다. [VM 동작](vm-behavior.md)의 슬롯 보존 규칙을 따른다.
+- `VARG A count` (`ABx`, A=목적지, Bx=count): extra를 고정 개수 복사하고 부족분은 `nil`; `top`은 유지한다.
+- `VARG.v A`: extra를 전부 복사하고 `top=base+1+A+nextra`로 설정한다.
+- prep 전에는 `nextra=0`이다. prep 자체는 필수가 아니며 `@va` 진입 인수는 `RETURN.v 0`으로 바로 반환할 수 있다.
+- open list 및 0개 범위의 시작은 `A==slots`도 허용한다. 일반 레지스터 접근은 여전히 `A<slots`다.
+- 인덱스/크기 연산은 `uint32_t` 범위를 검사하며, open 인수·결과 개수는 255개로 제한하지 않는다.
 
 ## 문자열/배열 연산 규약
 - `CONCAT A B C`
@@ -59,6 +83,7 @@
   - ABC: `ADD SUB MUL DIV IDIV MOD POW CONCAT EQ NE LT LE GT GE BAND BOR BXOR SHL SHR GETARRAY SETARRAY SETTABLE IFEQ IFNE IFLT IFLE IFGT IFGE SETARRAYI`
   - ABx: `LOAD NEWARRAY SETGLOBALK SETUPVAL SETGLOBAL`
 - 그 외 opcode에서 `i`는 무시된다.
+  - 단, `CALL`, `RETURN`, `VARG`에서는 `i`가 위의 `.v` 플래그다.
 
 ## 업밸류 캡처 규약
 `Chunk`는 `upvalue_infos`를 가진다. 각 항목은 `{ source, index }`다.
@@ -71,6 +96,7 @@
 - 섹션
   - `.const`
   - `.chunk <name> <arity> <slots>`
+- arity는 `0..254` 또는 `@va`. 예: `.chunk forward @va 4`.
 - `.const` 항목 타입은 `number`, `string`만 허용
 - chunk 내부 지시어
   - `.upvalue local <index>`
@@ -136,7 +162,12 @@ RETURN 0 1
 | IFFALSY / IFTRUTHY | ABx | `A Bx` | `if cond(R[A]) then pc = pc + 1` |
 | IFEQ/IFNE/IFLT/IFLE/IFGT/IFGE | ABC | `A B C` | `if not cmp(R[B], RI[C]) then pc = pc + 1` |
 | CALL | ABC | `F argc retc` | `call(R[F], argc, retc)` |
+| CALL.v | ABC | `F retc` | `R[F+1]`부터 `top`까지 전달 |
 | RETURN | ABx | `A Bx` | `return R[A..A+Bx-1]` |
+| RETURN.v | ABx | `A` | `R[A]`부터 `top`까지 반환 |
+| VARGPREP | ABx | `n` | 현재 인수열을 고정 n개와 extra로 재배치 |
+| VARG | ABx | `A count` | extra count개 복사, 부족분 nil |
+| VARG.v | ABx | `A` | extra 전부 복사, top 갱신 |
 | CLOSURE | ABx | `A Bx` | `R[A] = closure(Bx)` |
 | GETUPVAL | ABx | `A Bx` | `R[Bx] = U[A]` |
 | SETUPVAL | ABx | `A Bx` | `U[A] = RI[Bx]` |

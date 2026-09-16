@@ -178,37 +178,42 @@ Value VM::pop_value() {
     if (v_stack_.empty()) {
         throw ApiError("stack underflow");
     }
-    if (v_stack_.size() <= i_stack_.back().base) {
+    const auto begin = i_stack_.size() == 1 ? 0U : i_stack_.back().base + 1U;
+    if (v_stack_.size() <= begin) {
         throw InternalError("frame stack underflow");
     }
     Value out = v_stack_.back();
+    close_upvalues(static_cast<std::uint32_t>(v_stack_.size() - 1U));
     v_stack_.pop_back();
+    i_stack_.back().top = static_cast<std::uint32_t>(v_stack_.size());
     return out;
 }
 
 void VM::push_value(Value value) {
     if (v_stack_.size() >= std::numeric_limits<std::uint32_t>::max()) {
-        throw InternalError("stack exceeds uint32 range");
+        throw StackOverflowError("stack exceeds uint32 range");
     }
     v_stack_.push_back(value);
+    i_stack_.back().top = static_cast<std::uint32_t>(v_stack_.size());
 }
 
 std::size_t VM::stack_top() const {
     if (i_stack_.empty()) {
         throw InternalError("call frame is not available");
     }
-    const std::size_t base = i_stack_.back().base;
+    const std::size_t base = i_stack_.size() == 1 ? 0U : i_stack_.back().base + 1U;
     if (v_stack_.size() < base) {
         throw InternalError("frame base is out of stack bounds");
     }
     return v_stack_.size() - base;
 }
 
-Value VM::getlocal(std::uint8_t index) const {
+Value VM::getlocal(std::uint32_t index) const {
     if (i_stack_.empty()) {
         throw InternalError("call frame is not available");
     }
-    const std::size_t at = i_stack_.back().base + index;
+    const std::size_t begin = i_stack_.size() == 1 ? 0U : i_stack_.back().base + 1U;
+    const std::size_t at = begin + index;
     if (at >= v_stack_.size()) {
         throw ApiError("local index out of bounds");
     }
@@ -219,7 +224,7 @@ Value VM::getupvalue(std::uint8_t index) const {
     if (i_stack_.empty()) {
         throw InternalError("call frame is not available");
     }
-    Closure* closure = i_stack_.back().closure;
+    Closure* closure = frame_closure();
     if (closure == nullptr) {
         // the number of upvalues of sentinel callframe is treated as 0
         throw ApiError("upvalue index out of bounds");
