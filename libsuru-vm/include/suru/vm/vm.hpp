@@ -9,6 +9,7 @@
 #include "suru/vm/object.hpp"
 #include "suru/vm/codeunit.hpp"
 #include "suru/vm/stringset.hpp"
+#include "suru/ir/codeunit.hpp"
 
 namespace suru::vm {
 
@@ -24,6 +25,7 @@ public:
 
     static constexpr std::uint16_t multret = 0x1ff;
     void call(std::uint32_t arg_count, std::uint16_t retc);
+    [[noreturn]] void raise(Value payload);
 
     [[nodiscard]] String* make_string(std::string_view text);
     [[nodiscard]] Array* make_array(std::size_t len);
@@ -32,6 +34,7 @@ public:
 
     [[nodiscard]] CodeUnit* make_code_unit();
     [[nodiscard]] Closure* make_closure(CodeUnit* cu, std::uint32_t chunk_index);
+    [[nodiscard]] Closure* load_code_unit(const suru::ir::CodeUnit& image);
 
     [[nodiscard]] Table* globals();
 

@@ -1,6 +1,7 @@
-
 #include "suru/front/parser.hpp"
 
+#include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -8,605 +9,429 @@
 namespace suru::front {
 namespace {
 
-ParseNode make_node(std::string kind, SourceLocation location) {
-    ParseNode node;
-    node.kind = std::move(kind);
-    node.location = location;
-    return node;
-}
-
-void add_attr(ParseNode& node, std::string key, std::string value) {
-    node.attributes.push_back({std::move(key), std::move(value)});
-}
-
-void add_node(ParseNode& node, std::string key, ParseNode child) {
-    node.nodes.push_back({std::move(key), std::move(child)});
-}
-
-void add_list(ParseNode& node, std::string key, std::vector<ParseNode> list) {
-    node.lists.push_back({std::move(key), std::move(list)});
-}
-
 class Parser {
 public:
     explicit Parser(std::vector<Token> tokens) : tokens_(std::move(tokens)) {}
 
     ParseResult run() {
-        if (tokens_.empty()) {
-            tokens_.push_back(Token {TokenKind::EndOfFile, "", SourceLocation {}});
-        } else if (tokens_.back().kind != TokenKind::EndOfFile) {
+        if (tokens_.empty()) tokens_.push_back(Token {TokenKind::EndOfFile, "", {}});
+        else if (tokens_.back().kind != TokenKind::EndOfFile) {
             tokens_.push_back(Token {TokenKind::EndOfFile, "", tokens_.back().location});
         }
 
         ParseResult result;
         result.tree.root = parse_root();
         result.diagnostics = std::move(diagnostics_);
-        if (status_ == ParseStatus::Ok && !result.diagnostics.empty()) {
-            status_ = ParseStatus::Error;
-        }
+        if (status_ == ParseStatus::Ok && !result.diagnostics.empty()) status_ = ParseStatus::Error;
         result.status = status_;
         return result;
     }
 
 private:
-    ParseNode parse_root() {
-        ParseNode block = parse_block();
-        if (!failed_ && !at_end()) {
-            error_here("unexpected token after block");
-        }
+    NodeId next_id() { return next_id_++; }
+    SourceRange range(SourceLocation location) const { return SourceRange {location, location}; }
+
+    template <typename T>
+    ExprPtr expression(SourceLocation location, T kind) {
+        return std::make_unique<Expr>(Expr {next_id(), range(location), ExprKind {std::move(kind)}});
+    }
+
+    template <typename T>
+    StmtPtr statement(SourceLocation location, T kind) {
+        return std::make_unique<Stmt>(Stmt {next_id(), range(location), StmtKind {std::move(kind)}});
+    }
+
+    Block parse_root() {
+        Block block = parse_block();
+        if (!failed_ && !at_end()) error_here("unexpected token after block");
         return block;
     }
 
-    ParseNode parse_block() {
-        ParseNode block = make_node("Block", current().location);
-        std::vector<ParseNode> statements;
+    Block parse_block() {
+        const SourceLocation location = current().location;
+        Block block {next_id(), range(location), {}};
         while (!at_end() && !is_terminator(current().kind)) {
-            if (current().kind == TokenKind::Semicolon) {
-                advance();
-                continue;
-            }
+            if (match(TokenKind::Semicolon)) continue;
             if (current().kind == TokenKind::KwReturn) {
-                statements.push_back(parse_return_statement());
-                while (match(TokenKind::Semicolon)) {
-                }
+                block.statements.push_back(parse_return_statement());
+                while (match(TokenKind::Semicolon)) {}
                 break;
             }
-            statements.push_back(parse_statement());
-            if (failed_) {
-                break;
-            }
-            while (match(TokenKind::Semicolon)) {
-            }
+            block.statements.push_back(parse_statement());
+            if (failed_) break;
+            while (match(TokenKind::Semicolon)) {}
         }
-        add_list(block, "statements", std::move(statements));
         return block;
     }
 
-    ParseNode parse_statement() {
+    BlockPtr block_ptr() { return std::make_unique<Block>(parse_block()); }
+
+    StmtPtr parse_statement() {
         switch (current().kind) {
             case TokenKind::KwBreak: return parse_break_statement();
-            case TokenKind::KwGoto: return parse_goto_statement();
+            case TokenKind::KwContinue: return parse_continue_statement();
             case TokenKind::KwDo: return parse_do_statement();
-            case TokenKind::KwWhile: return parse_while_statement();
-            case TokenKind::KwRepeat: return parse_repeat_statement();
+            case TokenKind::KwWhile: return parse_while_statement({});
+            case TokenKind::KwRepeat: return parse_repeat_statement({});
             case TokenKind::KwIf: return parse_if_statement();
-            case TokenKind::KwFor: return parse_for_statement();
+            case TokenKind::KwFor: return parse_for_statement({});
             case TokenKind::KwFunction: return parse_function_statement();
             case TokenKind::KwLocal: return parse_local_statement();
-            case TokenKind::ColonColon: return parse_label_statement();
-            default: return parse_assignment_or_call_statement();
+            default:
+                if (current().kind == TokenKind::Identifier
+                    && peek(1).kind == TokenKind::Colon
+                    && (peek(2).kind == TokenKind::KwWhile
+                        || peek(2).kind == TokenKind::KwRepeat
+                        || peek(2).kind == TokenKind::KwFor)) {
+                    std::string label = advance().lexeme;
+                    advance();
+                    if (current().kind == TokenKind::KwWhile) return parse_while_statement(std::move(label));
+                    if (current().kind == TokenKind::KwRepeat) return parse_repeat_statement(std::move(label));
+                    return parse_for_statement(std::move(label));
+                }
+                return parse_assignment_or_call_statement();
         }
     }
 
-    ParseNode parse_break_statement() {
-        ParseNode node = make_node("BreakStatement", current().location);
-        consume(TokenKind::KwBreak, "expected 'break'");
-        return node;
+    StmtPtr parse_break_statement() {
+        const Token keyword = advance();
+        std::optional<std::string> label;
+        if (current().kind == TokenKind::Identifier) label = advance().lexeme;
+        return statement(keyword.location, BreakStmt {std::move(label)});
     }
 
-    ParseNode parse_goto_statement() {
-        ParseNode node = make_node("GotoStatement", current().location);
-        consume(TokenKind::KwGoto, "expected 'goto'");
-        Token label = consume(TokenKind::Identifier, "expected label name");
-        add_attr(node, "label", label.lexeme);
-        return node;
+    StmtPtr parse_continue_statement() {
+        const Token keyword = advance();
+        std::optional<std::string> label;
+        if (current().kind == TokenKind::Identifier) label = advance().lexeme;
+        return statement(keyword.location, ContinueStmt {std::move(label)});
     }
 
-    ParseNode parse_do_statement() {
-        ParseNode node = make_node("DoStatement", current().location);
-        consume(TokenKind::KwDo, "expected 'do'");
-        add_node(node, "block", parse_block());
+    StmtPtr parse_do_statement() {
+        const Token keyword = advance();
+        BlockPtr block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return node;
+        return statement(keyword.location, DoStmt {std::move(block)});
     }
 
-    ParseNode parse_while_statement() {
-        ParseNode node = make_node("WhileStatement", current().location);
-        consume(TokenKind::KwWhile, "expected 'while'");
-        add_node(node, "condition", parse_expression());
+    StmtPtr parse_while_statement(std::optional<std::string> label) {
+        const Token keyword = consume(TokenKind::KwWhile, "expected 'while'");
+        ExprPtr condition = parse_expression();
         consume(TokenKind::KwDo, "expected 'do'");
-        add_node(node, "block", parse_block());
+        BlockPtr block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return node;
+        return statement(keyword.location, WhileStmt {std::move(label), std::move(condition), std::move(block)});
     }
 
-    ParseNode parse_repeat_statement() {
-        ParseNode node = make_node("RepeatStatement", current().location);
-        consume(TokenKind::KwRepeat, "expected 'repeat'");
-        add_node(node, "block", parse_block());
+    StmtPtr parse_repeat_statement(std::optional<std::string> label) {
+        const Token keyword = consume(TokenKind::KwRepeat, "expected 'repeat'");
+        BlockPtr block = block_ptr();
         consume(TokenKind::KwUntil, "expected 'until'");
-        add_node(node, "condition", parse_expression());
-        return node;
+        ExprPtr condition = parse_expression();
+        return statement(keyword.location, RepeatStmt {std::move(label), std::move(block), std::move(condition)});
     }
 
-    ParseNode parse_if_statement() {
-        ParseNode node = make_node("IfStatement", current().location);
-        consume(TokenKind::KwIf, "expected 'if'");
-
-        std::vector<ParseNode> branches;
-        ParseNode branch = make_node("IfBranch", current().location);
-        add_node(branch, "condition", parse_expression());
-        consume(TokenKind::KwThen, "expected 'then'");
-        add_node(branch, "block", parse_block());
-        branches.push_back(std::move(branch));
-
-        while (match(TokenKind::KwElseIf)) {
-            ParseNode elseif_branch = make_node("ElseIfBranch", previous().location);
-            add_node(elseif_branch, "condition", parse_expression());
+    StmtPtr parse_if_statement() {
+        const Token keyword = consume(TokenKind::KwIf, "expected 'if'");
+        std::vector<IfBranch> branches;
+        do {
+            const SourceLocation location = current().location;
+            ExprPtr condition = parse_expression();
             consume(TokenKind::KwThen, "expected 'then'");
-            add_node(elseif_branch, "block", parse_block());
-            branches.push_back(std::move(elseif_branch));
-        }
+            branches.push_back(IfBranch {next_id(), range(location), std::move(condition), block_ptr()});
+        } while (match(TokenKind::KwElseIf));
 
-        add_list(node, "branches", std::move(branches));
-
-        if (match(TokenKind::KwElse)) {
-            add_node(node, "elseBlock", parse_block());
-        }
+        BlockPtr else_block;
+        if (match(TokenKind::KwElse)) else_block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return node;
+        return statement(keyword.location, IfStmt {std::move(branches), std::move(else_block)});
     }
 
-    ParseNode parse_for_statement() {
-        consume(TokenKind::KwFor, "expected 'for'");
-        Token first_name = consume(TokenKind::Identifier, "expected loop variable");
-
+    StmtPtr parse_for_statement(std::optional<std::string> label) {
+        const Token keyword = consume(TokenKind::KwFor, "expected 'for'");
+        const Token first = consume(TokenKind::Identifier, "expected loop variable");
         if (match(TokenKind::Assign)) {
-            ParseNode node = make_node("NumericForStatement", first_name.location);
-            add_attr(node, "name", first_name.lexeme);
-            add_node(node, "initial", parse_expression());
+            ExprPtr initial = parse_expression();
             consume(TokenKind::Comma, "expected ','");
-            add_node(node, "limit", parse_expression());
-            if (match(TokenKind::Comma)) {
-                add_node(node, "step", parse_expression());
-            }
+            ExprPtr limit = parse_expression();
+            ExprPtr step;
+            if (match(TokenKind::Comma)) step = parse_expression();
             consume(TokenKind::KwDo, "expected 'do'");
-            add_node(node, "block", parse_block());
+            BlockPtr block = block_ptr();
             consume(TokenKind::KwEnd, "expected 'end'");
-            return node;
+            return statement(keyword.location, NumericForStmt {
+                std::move(label), first.lexeme, std::move(initial), std::move(limit),
+                std::move(step), std::move(block)
+            });
         }
 
-        ParseNode node = make_node("GenericForStatement", first_name.location);
-        std::vector<ParseNode> names;
-        ParseNode first = make_node("Name", first_name.location);
-        add_attr(first, "value", first_name.lexeme);
-        names.push_back(std::move(first));
-        while (match(TokenKind::Comma)) {
-            Token n = consume(TokenKind::Identifier, "expected loop variable");
-            ParseNode name = make_node("Name", n.location);
-            add_attr(name, "value", n.lexeme);
-            names.push_back(std::move(name));
-        }
+        std::vector<std::string> names {first.lexeme};
+        while (match(TokenKind::Comma)) names.push_back(consume(TokenKind::Identifier, "expected loop variable").lexeme);
         consume(TokenKind::KwIn, "expected 'in'");
-        add_list(node, "names", std::move(names));
-        add_list(node, "expressions", parse_expression_list());
+        auto expressions = parse_expression_list();
         consume(TokenKind::KwDo, "expected 'do'");
-        add_node(node, "block", parse_block());
+        BlockPtr block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return node;
+        return statement(keyword.location, GenericForStmt {
+            std::move(label), std::move(names), std::move(expressions), std::move(block)
+        });
     }
 
-    ParseNode parse_function_statement() {
-        ParseNode node = make_node("FunctionStatement", current().location);
-        consume(TokenKind::KwFunction, "expected 'fn'");
-        add_node(node, "name", parse_function_name());
-        add_node(node, "body", parse_function_body());
-        return node;
+    FunctionName parse_function_name() {
+        FunctionName name;
+        name.path.push_back(consume(TokenKind::Identifier, "expected function name").lexeme);
+        while (match(TokenKind::Dot)) name.path.push_back(consume(TokenKind::Identifier, "expected identifier").lexeme);
+        if (match(TokenKind::Colon)) name.method = consume(TokenKind::Identifier, "expected method name").lexeme;
+        return name;
     }
 
-    ParseNode parse_local_statement() {
-        consume(TokenKind::KwLocal, "expected 'local'");
-        if (match(TokenKind::KwFunction)) {
-            ParseNode node = make_node("LocalFunctionStatement", previous().location);
-            Token name = consume(TokenKind::Identifier, "expected function name");
-            add_attr(node, "name", name.lexeme);
-            add_node(node, "body", parse_function_body());
-            return node;
-        }
-
-        ParseNode node = make_node("LocalDeclaration", previous().location);
-        add_list(node, "names", parse_attribute_name_list());
-        if (match(TokenKind::Assign)) {
-            add_list(node, "expressions", parse_expression_list());
-        }
-        return node;
-    }
-
-    ParseNode parse_label_statement() {
-        ParseNode node = make_node("LabelStatement", current().location);
-        consume(TokenKind::ColonColon, "expected '::'");
-        Token label = consume(TokenKind::Identifier, "expected label name");
-        consume(TokenKind::ColonColon, "expected '::'");
-        add_attr(node, "label", label.lexeme);
-        return node;
-    }
-
-    ParseNode parse_return_statement() {
-        ParseNode node = make_node("ReturnStatement", current().location);
-        consume(TokenKind::KwReturn, "expected 'return'");
-        if (current().kind != TokenKind::Semicolon && !is_terminator(current().kind) && current().kind != TokenKind::EndOfFile) {
-            add_list(node, "expressions", parse_expression_list());
-        }
-        return node;
-    }
-
-    ParseNode parse_assignment_or_call_statement() {
-        ParseNode left = parse_prefix_expression();
-        if (failed_) {
-            return make_node("Error", current().location);
-        }
-
-        if (is_call_node(left.kind) && current().kind != TokenKind::Assign && current().kind != TokenKind::Comma) {
-            ParseNode node = make_node("FunctionCallStatement", left.location);
-            add_node(node, "call", std::move(left));
-            return node;
-        }
-
-        if (!is_var_node(left.kind)) {
-            error_at(left.location, "expected assignment or function call statement");
-            return make_node("Error", left.location);
-        }
-
-        ParseNode node = make_node("AssignmentStatement", left.location);
-        std::vector<ParseNode> vars;
-        vars.push_back(std::move(left));
-        while (match(TokenKind::Comma)) {
-            ParseNode var = parse_prefix_expression();
-            if (!is_var_node(var.kind)) {
-                error_at(var.location, "expected variable in assignment");
-                return make_node("Error", var.location);
-            }
-            vars.push_back(std::move(var));
-        }
-        consume(TokenKind::Assign, "expected '='");
-        add_list(node, "variables", std::move(vars));
-        add_list(node, "expressions", parse_expression_list());
-        return node;
-    }
-
-    ParseNode parse_function_name() {
-        Token first = consume(TokenKind::Identifier, "expected function name");
-        ParseNode node = make_node("FunctionName", first.location);
-        std::string path = first.lexeme;
-        while (match(TokenKind::Dot)) {
-            Token part = consume(TokenKind::Identifier, "expected identifier");
-            path += "." + part.lexeme;
-        }
-        add_attr(node, "path", path);
-        if (match(TokenKind::Colon)) {
-            Token method = consume(TokenKind::Identifier, "expected method name");
-            add_attr(node, "method", method.lexeme);
-        }
-        return node;
-    }
-
-    ParseNode parse_function_body() {
-        ParseNode body = make_node("FunctionBody", current().location);
+    FunctionBodyPtr parse_function_body() {
+        const SourceLocation location = current().location;
         consume(TokenKind::LParen, "expected '('");
+        std::vector<std::string> parameters;
         bool vararg = false;
-        std::vector<ParseNode> params;
         if (current().kind != TokenKind::RParen) {
-            parse_parameters(params, vararg);
-        }
-        consume(TokenKind::RParen, "expected ')'");
-        add_list(body, "parameters", std::move(params));
-        add_attr(body, "vararg", vararg ? "true" : "false");
-        add_node(body, "block", parse_block());
-        consume(TokenKind::KwEnd, "expected 'end'");
-        return body;
-    }
-
-    void parse_parameters(std::vector<ParseNode>& params, bool& vararg) {
-        if (match(TokenKind::VarArg)) {
-            vararg = true;
-            return;
-        }
-        Token p = consume(TokenKind::Identifier, "expected parameter name");
-        ParseNode param = make_node("Parameter", p.location);
-        add_attr(param, "name", p.lexeme);
-        params.push_back(std::move(param));
-        while (match(TokenKind::Comma)) {
             if (match(TokenKind::VarArg)) {
                 vararg = true;
-                return;
+            } else {
+                parameters.push_back(consume(TokenKind::Identifier, "expected parameter name").lexeme);
+                while (match(TokenKind::Comma)) {
+                    if (match(TokenKind::VarArg)) { vararg = true; break; }
+                    parameters.push_back(consume(TokenKind::Identifier, "expected parameter name").lexeme);
+                }
             }
-            Token x = consume(TokenKind::Identifier, "expected parameter name");
-            ParseNode pn = make_node("Parameter", x.location);
-            add_attr(pn, "name", x.lexeme);
-            params.push_back(std::move(pn));
         }
+        consume(TokenKind::RParen, "expected ')'");
+        BlockPtr block = block_ptr();
+        consume(TokenKind::KwEnd, "expected 'end'");
+        return std::make_unique<FunctionBody>(FunctionBody {
+            next_id(), range(location), std::move(parameters), vararg, std::move(block)
+        });
     }
 
-    std::vector<ParseNode> parse_attribute_name_list() {
-        std::vector<ParseNode> names;
-        do {
-            Token n = consume(TokenKind::Identifier, "expected local name");
-            ParseNode node = make_node("LocalName", n.location);
-            add_attr(node, "name", n.lexeme);
-            if (match(TokenKind::Less)) {
-                Token attr = consume(TokenKind::Identifier, "expected attribute name");
-                consume(TokenKind::Greater, "expected '>'");
-                add_attr(node, "attribute", attr.lexeme);
-            }
-            names.push_back(std::move(node));
-        } while (match(TokenKind::Comma));
-        return names;
+    StmtPtr parse_function_statement() {
+        const Token keyword = advance();
+        FunctionName name = parse_function_name();
+        FunctionBodyPtr body = parse_function_body();
+        return statement(keyword.location, FunctionStmt {std::move(name), std::move(body)});
     }
 
-    std::vector<ParseNode> parse_expression_list() {
-        std::vector<ParseNode> expressions;
-        expressions.push_back(parse_expression());
+    StmtPtr parse_local_statement() {
+        const Token keyword = advance();
+        if (match(TokenKind::KwFunction)) {
+            const Token name = consume(TokenKind::Identifier, "expected function name");
+            return statement(keyword.location, LocalFunctionStmt {name.lexeme, parse_function_body()});
+        }
+        std::vector<std::string> names;
+        names.push_back(consume(TokenKind::Identifier, "expected local name").lexeme);
+        while (match(TokenKind::Comma)) names.push_back(consume(TokenKind::Identifier, "expected local name").lexeme);
+        std::vector<ExprPtr> expressions;
+        if (match(TokenKind::Assign)) expressions = parse_expression_list();
+        return statement(keyword.location, LocalDeclStmt {std::move(names), std::move(expressions)});
+    }
+
+    StmtPtr parse_return_statement() {
+        const Token keyword = advance();
+        std::vector<ExprPtr> expressions;
+        if (current().kind != TokenKind::Semicolon && !is_terminator(current().kind) && !at_end()) {
+            expressions = parse_expression_list();
+        }
+        return statement(keyword.location, ReturnStmt {std::move(expressions)});
+    }
+
+    StmtPtr parse_assignment_or_call_statement() {
+        ExprPtr left = parse_prefix_expression();
+        if (failed_) return statement(current().location, CallStmt {std::move(left)});
+        if (is_call(*left) && current().kind != TokenKind::Assign && current().kind != TokenKind::Comma) {
+            const SourceLocation location = left->range.begin;
+            return statement(location, CallStmt {std::move(left)});
+        }
+        if (!is_variable(*left)) {
+            const SourceLocation location = left->range.begin;
+            error_at(location, "expected assignment or function call statement");
+            return statement(location, CallStmt {std::move(left)});
+        }
+        const SourceLocation location = left->range.begin;
+        std::vector<ExprPtr> variables;
+        variables.push_back(std::move(left));
         while (match(TokenKind::Comma)) {
-            expressions.push_back(parse_expression());
+            ExprPtr variable = parse_prefix_expression();
+            if (!is_variable(*variable)) { error_at(variable->range.begin, "expected variable in assignment"); break; }
+            variables.push_back(std::move(variable));
         }
+        consume(TokenKind::Assign, "expected '='");
+        auto expressions = parse_expression_list();
+        return statement(location, AssignmentStmt {std::move(variables), std::move(expressions)});
+    }
+
+    std::vector<ExprPtr> parse_expression_list() {
+        std::vector<ExprPtr> expressions;
+        expressions.push_back(parse_expression());
+        while (match(TokenKind::Comma)) expressions.push_back(parse_expression());
         return expressions;
     }
 
-    ParseNode parse_expression() {
-        return parse_subexpression(0);
+    ExprPtr parse_expression() { return parse_subexpression(0); }
+
+    ExprPtr parse_subexpression(int min_priority) {
+        ExprPtr left;
+        if (is_unary(current().kind)) {
+            const Token op = advance();
+            left = expression(op.location, UnaryExpr {op.lexeme, parse_subexpression(11)});
+        } else left = parse_simple_expression();
+        while (!failed_) {
+            int lhs_priority = 0;
+            int rhs_priority = 0;
+            if (!binary_priority(current().kind, lhs_priority, rhs_priority) || lhs_priority <= min_priority) break;
+            const Token op = advance();
+            left = expression(op.location, BinaryExpr {op.lexeme, std::move(left), parse_subexpression(rhs_priority)});
+        }
+        return left;
     }
 
-    ParseNode parse_subexpression(int min_priority) {
-        ParseNode lhs;
-        if (is_unary(current().kind)) {
-            Token op = advance();
-            ParseNode unary = make_node("UnaryExpression", op.location);
-            add_attr(unary, "operator", op.lexeme);
-            add_node(unary, "operand", parse_subexpression(11));
-            lhs = std::move(unary);
-        } else {
-            lhs = parse_simple_expression();
+    ExprPtr parse_simple_expression() {
+        const Token token = current();
+        switch (token.kind) {
+            case TokenKind::KwNil: advance(); return expression(token.location, NilExpr {});
+            case TokenKind::KwFalse: advance(); return expression(token.location, BoolExpr {false});
+            case TokenKind::KwTrue: advance(); return expression(token.location, BoolExpr {true});
+            case TokenKind::Numeral: advance(); return expression(token.location, NumberExpr {token.lexeme});
+            case TokenKind::String: advance(); return expression(token.location, StringExpr {token.lexeme});
+            case TokenKind::VarArg: advance(); return expression(token.location, VarargExpr {});
+            case TokenKind::KwFunction: advance(); return expression(token.location, FunctionExpr {parse_function_body()});
+            case TokenKind::LBrace: return parse_table_constructor();
+            case TokenKind::LBracket: return parse_array_constructor();
+            default: return parse_prefix_expression();
         }
+    }
 
-        while (!failed_) {
-            int left = 0;
-            int right = 0;
-            if (!binary_priority(current().kind, left, right) || left <= min_priority) {
+    ExprPtr parse_array_constructor() {
+        const Token open = advance();
+        std::vector<ExprPtr> elements;
+        if (current().kind != TokenKind::RBracket) {
+            elements = parse_expression_list();
+            match(TokenKind::Comma);
+        }
+        consume(TokenKind::RBracket, "expected ']'");
+        return expression(open.location, ArrayExpr {std::move(elements)});
+    }
+
+    ExprPtr literal_table_key() {
+        const Token token = advance();
+        switch (token.kind) {
+            case TokenKind::Identifier: case TokenKind::String:
+                return expression(token.location, StringExpr {token.lexeme});
+            case TokenKind::Numeral: return expression(token.location, NumberExpr {token.lexeme});
+            case TokenKind::KwTrue: return expression(token.location, BoolExpr {true});
+            case TokenKind::KwFalse: return expression(token.location, BoolExpr {false});
+            default: break;
+        }
+        error_at(token.location, "expected table key");
+        return expression(token.location, NilExpr {});
+    }
+
+    ExprPtr parse_table_constructor() {
+        const Token open = advance();
+        std::vector<TableField> fields;
+        while (!failed_ && current().kind != TokenKind::RBrace) {
+            const SourceLocation location = current().location;
+            ExprPtr key;
+            if (match(TokenKind::LParen)) {
+                key = parse_expression();
+                consume(TokenKind::RParen, "expected ')'");
+            } else if (current().kind == TokenKind::Identifier || current().kind == TokenKind::String
+                || current().kind == TokenKind::Numeral || current().kind == TokenKind::KwTrue
+                || current().kind == TokenKind::KwFalse) {
+                key = literal_table_key();
+            } else {
+                error_here("expected explicit table key");
                 break;
             }
-            Token op = advance();
-            ParseNode rhs = parse_subexpression(right);
-            ParseNode expr = make_node("BinaryExpression", op.location);
-            add_attr(expr, "operator", op.lexeme);
-            add_node(expr, "left", std::move(lhs));
-            add_node(expr, "right", std::move(rhs));
-            lhs = std::move(expr);
-        }
-        return lhs;
-    }
-
-    ParseNode parse_simple_expression() {
-        switch (current().kind) {
-            case TokenKind::KwNil: {
-                Token t = advance();
-                return make_node("NilLiteral", t.location);
-            }
-            case TokenKind::KwFalse: {
-                Token t = advance();
-                ParseNode n = make_node("BooleanLiteral", t.location);
-                add_attr(n, "value", "false");
-                return n;
-            }
-            case TokenKind::KwTrue: {
-                Token t = advance();
-                ParseNode n = make_node("BooleanLiteral", t.location);
-                add_attr(n, "value", "true");
-                return n;
-            }
-            case TokenKind::Numeral: {
-                Token t = advance();
-                ParseNode n = make_node("NumeralLiteral", t.location);
-                add_attr(n, "value", t.lexeme);
-                return n;
-            }
-            case TokenKind::String: {
-                Token t = advance();
-                ParseNode n = make_node("StringLiteral", t.location);
-                add_attr(n, "value", t.lexeme);
-                return n;
-            }
-            case TokenKind::VarArg: {
-                Token t = advance();
-                return make_node("VarArg", t.location);
-            }
-            case TokenKind::KwFunction: {
-                Token t = advance();
-                ParseNode n = make_node("FunctionExpression", t.location);
-                add_node(n, "body", parse_function_body());
-                return n;
-            }
-            case TokenKind::LBrace:
-                return parse_table_constructor();
-            default:
-                return parse_prefix_expression();
-        }
-    }
-
-    ParseNode parse_table_constructor() {
-        ParseNode table = make_node("TableConstructor", current().location);
-        consume(TokenKind::LBrace, "expected '{'");
-        std::vector<ParseNode> fields;
-        if (current().kind != TokenKind::RBrace) {
-            fields.push_back(parse_field());
-            while (match(TokenKind::Comma) || match(TokenKind::Semicolon)) {
-                if (current().kind == TokenKind::RBrace) {
-                    break;
-                }
-                fields.push_back(parse_field());
-            }
+            consume(TokenKind::Assign, "expected '='");
+            fields.push_back(TableField {next_id(), range(location), std::move(key), parse_expression()});
+            if (!match(TokenKind::Comma) && !match(TokenKind::Semicolon)) break;
         }
         consume(TokenKind::RBrace, "expected '}'");
-        add_list(table, "fields", std::move(fields));
-        return table;
+        return expression(open.location, TableExpr {std::move(fields)});
     }
 
-    ParseNode parse_field() {
-        if (match(TokenKind::LBracket)) {
-            ParseNode field = make_node("TableField", previous().location);
-            add_attr(field, "fieldKind", "computed");
-            add_node(field, "key", parse_expression());
-            consume(TokenKind::RBracket, "expected ']'");
-            consume(TokenKind::Assign, "expected '='");
-            add_node(field, "value", parse_expression());
-            return field;
-        }
-        if (current().kind == TokenKind::Identifier && peek(1).kind == TokenKind::Assign) {
-            Token k = advance();
-            consume(TokenKind::Assign, "expected '='");
-            ParseNode field = make_node("TableField", k.location);
-            add_attr(field, "fieldKind", "named");
-            add_attr(field, "name", k.lexeme);
-            add_node(field, "value", parse_expression());
-            return field;
-        }
-        ParseNode field = make_node("TableField", current().location);
-        add_attr(field, "fieldKind", "array");
-        add_node(field, "value", parse_expression());
-        return field;
-    }
-
-    ParseNode parse_prefix_expression() {
-        ParseNode expr;
+    ExprPtr parse_prefix_expression() {
+        ExprPtr result;
         if (match(TokenKind::Identifier)) {
-            Token name = previous();
-            expr = make_node("Name", name.location);
-            add_attr(expr, "value", name.lexeme);
+            const Token name = previous();
+            result = expression(name.location, NameExpr {name.lexeme});
         } else if (match(TokenKind::LParen)) {
-            ParseNode grouped = make_node("GroupedExpression", previous().location);
-            add_node(grouped, "expression", parse_expression());
+            const Token open = previous();
+            result = expression(open.location, GroupExpr {parse_expression()});
             consume(TokenKind::RParen, "expected ')'");
-            expr = std::move(grouped);
         } else {
+            const SourceLocation location = current().location;
             error_here("expected expression");
-            return make_node("Error", current().location);
+            return expression(location, NilExpr {});
         }
-
         while (!failed_) {
             if (match(TokenKind::LBracket)) {
-                ParseNode index = make_node("IndexExpression", previous().location);
-                add_node(index, "base", std::move(expr));
-                add_node(index, "index", parse_expression());
+                const Token open = previous();
+                ExprPtr key = parse_expression();
                 consume(TokenKind::RBracket, "expected ']'");
-                expr = std::move(index);
-                continue;
-            }
-            if (match(TokenKind::Dot)) {
-                Token field_name = consume(TokenKind::Identifier, "expected field name");
-                ParseNode field = make_node("FieldExpression", field_name.location);
-                add_node(field, "base", std::move(expr));
-                add_attr(field, "name", field_name.lexeme);
-                expr = std::move(field);
-                continue;
-            }
-            if (match(TokenKind::Colon)) {
-                Token method = consume(TokenKind::Identifier, "expected method name");
-                ParseNode call = make_node("MethodCallExpression", method.location);
-                add_node(call, "base", std::move(expr));
-                add_attr(call, "method", method.lexeme);
-                add_list(call, "arguments", parse_arguments());
-                expr = std::move(call);
-                continue;
-            }
-            if (starts_args(current().kind)) {
-                ParseNode call = make_node("FunctionCallExpression", current().location);
-                add_node(call, "callee", std::move(expr));
-                add_list(call, "arguments", parse_arguments());
-                expr = std::move(call);
-                continue;
-            }
-            break;
+                result = expression(open.location, IndexExpr {std::move(result), std::move(key)});
+            } else if (match(TokenKind::Dot)) {
+                const Token name = consume(TokenKind::Identifier, "expected field name");
+                result = expression(name.location, FieldExpr {std::move(result), name.lexeme});
+            } else if (match(TokenKind::Colon)) {
+                const Token method = consume(TokenKind::Identifier, "expected method name");
+                result = expression(method.location, MethodCallExpr {std::move(result), method.lexeme, parse_arguments()});
+            } else if (starts_arguments(current().kind)) {
+                const SourceLocation location = current().location;
+                result = expression(location, CallExpr {std::move(result), parse_arguments()});
+            } else break;
         }
-        return expr;
+        return result;
     }
 
-    std::vector<ParseNode> parse_arguments() {
-        std::vector<ParseNode> args;
+    std::vector<ExprPtr> parse_arguments() {
+        std::vector<ExprPtr> arguments;
         if (match(TokenKind::LParen)) {
-            if (current().kind != TokenKind::RParen) {
-                args = parse_expression_list();
-            }
+            if (current().kind != TokenKind::RParen) arguments = parse_expression_list();
             consume(TokenKind::RParen, "expected ')'");
-            return args;
-        }
-        if (current().kind == TokenKind::LBrace) {
-            args.push_back(parse_table_constructor());
-            return args;
-        }
-        if (current().kind == TokenKind::String) {
-            args.push_back(parse_simple_expression());
-            return args;
-        }
-        error_here("expected function arguments");
-        return args;
+        } else if (current().kind == TokenKind::LBrace) arguments.push_back(parse_table_constructor());
+        else if (current().kind == TokenKind::String) arguments.push_back(parse_simple_expression());
+        else error_here("expected function arguments");
+        return arguments;
     }
 
-    static bool starts_args(TokenKind kind) {
+    static bool starts_arguments(TokenKind kind) {
         return kind == TokenKind::LParen || kind == TokenKind::LBrace || kind == TokenKind::String;
     }
-
-    static bool is_var_node(const std::string& kind) {
-        return kind == "Name" || kind == "IndexExpression" || kind == "FieldExpression";
+    static bool is_variable(const Expr& expr) {
+        return std::holds_alternative<NameExpr>(expr.kind) || std::holds_alternative<IndexExpr>(expr.kind)
+            || std::holds_alternative<FieldExpr>(expr.kind);
     }
-
-    static bool is_call_node(const std::string& kind) {
-        return kind == "FunctionCallExpression" || kind == "MethodCallExpression";
+    static bool is_call(const Expr& expr) {
+        return std::holds_alternative<CallExpr>(expr.kind) || std::holds_alternative<MethodCallExpr>(expr.kind);
     }
-
     static bool is_unary(TokenKind kind) {
         return kind == TokenKind::Minus || kind == TokenKind::KwNot || kind == TokenKind::Hash || kind == TokenKind::Tilde;
     }
-
     static bool binary_priority(TokenKind kind, int& left, int& right) {
         switch (kind) {
             case TokenKind::KwOr: left = 1; right = 1; return true;
             case TokenKind::KwAnd: left = 2; right = 2; return true;
-            case TokenKind::Less:
-            case TokenKind::LessEq:
-            case TokenKind::Greater:
-            case TokenKind::GreaterEq:
-            case TokenKind::EqEq:
-            case TokenKind::NotEq:
+            case TokenKind::Less: case TokenKind::LessEq: case TokenKind::Greater:
+            case TokenKind::GreaterEq: case TokenKind::EqEq: case TokenKind::NotEq:
                 left = 3; right = 3; return true;
             case TokenKind::Pipe: left = 4; right = 4; return true;
             case TokenKind::Caret: left = 5; right = 5; return true;
             case TokenKind::Amp: left = 6; right = 6; return true;
-            case TokenKind::ShiftLeft:
-            case TokenKind::ShiftRight:
-                left = 7; right = 7; return true;
+            case TokenKind::ShiftLeft: case TokenKind::ShiftRight: left = 7; right = 7; return true;
             case TokenKind::DotDot: left = 8; right = 7; return true;
-            case TokenKind::Plus:
-            case TokenKind::Minus:
-                left = 9; right = 9; return true;
-            case TokenKind::Star:
-            case TokenKind::Slash:
-            case TokenKind::SlashSlash:
-            case TokenKind::Percent:
-                left = 10; right = 10; return true;
+            case TokenKind::Plus: case TokenKind::Minus: left = 9; right = 9; return true;
+            case TokenKind::Star: case TokenKind::Slash: case TokenKind::SlashSlash:
+            case TokenKind::Percent: left = 10; right = 10; return true;
             case TokenKind::Pow: left = 12; right = 11; return true;
             default: return false;
         }
     }
-
     bool is_terminator(TokenKind kind) const {
         return kind == TokenKind::KwEnd || kind == TokenKind::KwElse || kind == TokenKind::KwElseIf || kind == TokenKind::KwUntil;
     }
@@ -615,68 +440,31 @@ private:
     const Token& current() const { return tokens_[index_]; }
     const Token& previous() const { return tokens_[index_ - 1]; }
     const Token& peek(std::size_t offset) const {
-        std::size_t pos = index_ + offset;
-        if (pos >= tokens_.size()) {
-            return tokens_.back();
-        }
-        return tokens_[pos];
+        const std::size_t position = index_ + offset;
+        return position < tokens_.size() ? tokens_[position] : tokens_.back();
     }
-
-    Token advance() {
-        if (!at_end()) {
-            ++index_;
-        }
-        return tokens_[index_ - 1];
-    }
-
-    bool match(TokenKind kind) {
-        if (current().kind != kind) {
-            return false;
-        }
-        advance();
-        return true;
-    }
-
+    Token advance() { if (!at_end()) ++index_; return tokens_[index_ - 1]; }
+    bool match(TokenKind kind) { if (current().kind != kind) return false; advance(); return true; }
     Token consume(TokenKind kind, const std::string& message) {
-        if (current().kind == kind) {
-            return advance();
-        }
-        if (current().kind == TokenKind::EndOfFile) {
-            incomplete_here();
-            return Token {kind, "", current().location};
-        }
-        error_here(message);
+        if (current().kind == kind) return advance();
+        if (at_end()) incomplete_here(); else error_here(message);
         return Token {kind, "", current().location};
     }
-
-    void error_here(const std::string& message) {
-        if (current().kind == TokenKind::EndOfFile) {
-            incomplete_here();
-            return;
-        }
-        error_at(current().location, message);
-    }
-
+    void error_here(const std::string& message) { if (at_end()) incomplete_here(); else error_at(current().location, message); }
     void incomplete_here() {
-        if (!failed_) {
-            diagnostics_.push_back({current().location, "unexpected end of file"});
-        }
+        if (!failed_) diagnostics_.push_back({current().location, "unexpected end of file"});
         status_ = ParseStatus::Incomplete;
         failed_ = true;
     }
-
     void error_at(SourceLocation location, const std::string& message) {
-        if (!failed_) {
-            diagnostics_.push_back({location, message});
-        }
-        if (status_ == ParseStatus::Ok) {
-            status_ = ParseStatus::Error;
-        }
+        if (!failed_) diagnostics_.push_back({location, message});
+        if (status_ == ParseStatus::Ok) status_ = ParseStatus::Error;
         failed_ = true;
     }
 
     std::vector<Token> tokens_;
     std::size_t index_ {0};
+    NodeId next_id_ {1};
     bool failed_ {false};
     ParseStatus status_ {ParseStatus::Ok};
     std::vector<Diagnostic> diagnostics_;
@@ -684,8 +472,6 @@ private:
 
 } // namespace
 
-ParseResult parse_tokens(std::vector<Token> tokens) {
-    return Parser(std::move(tokens)).run();
-}
+ParseResult parse_tokens(std::vector<Token> tokens) { return Parser(std::move(tokens)).run(); }
 
 } // namespace suru::front

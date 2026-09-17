@@ -1,10 +1,13 @@
 #include "suru/vm/object.hpp"
 
+#include <cmath>
+
 namespace suru::vm {
 namespace {
 
 bool validate_table_key(Value key) {
-    return key.kind != ValueKind::Nil;
+    return key.kind != ValueKind::Nil
+        && !(key.kind == ValueKind::Number && std::isnan(key.number_));
 }
 
 } // namespace

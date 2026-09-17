@@ -5,10 +5,14 @@
 #include <cstring>
 #include <limits>
 #include <new>
+#include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "suru/vm/error.hpp"
+#include "suru/vm/raised_error.hpp"
+#include "suru/ir/image.hpp"
 
 namespace suru::vm {
 
@@ -108,6 +112,72 @@ Closure* VM::make_closure(CodeUnit* cu, std::uint32_t chunk_index) {
         object->at(i) = nullptr;
     }
     return object;
+}
+
+Closure* VM::load_code_unit(const suru::ir::CodeUnit& image) {
+    try { suru::ir::validate(image); }
+    catch (const suru::ir::ImageError& error) { throw InvalidImageError(error.what()); }
+
+    auto loaded = std::make_unique<CodeUnit>();
+    loaded->constants_.reserve(image.constants.size());
+    for (const suru::ir::Constant& constant : image.constants) {
+        std::visit([&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, suru::ir::NumberConstant>) {
+                loaded->constants_.push_back(Value::number(value.value));
+            } else {
+                loaded->constants_.push_back(Value::string(make_string(value.value)));
+            }
+        }, constant);
+    }
+
+    loaded->chunks_.reserve(image.chunks.size());
+    for (const suru::ir::Chunk& chunk : image.chunks) {
+        if (chunk.arity != 255 && chunk.arity > chunk.slots) {
+            throw InvalidImageError("chunk arity exceeds slots");
+        }
+        if (chunk.code.size() > std::numeric_limits<std::uint32_t>::max()
+            - loaded->code_.size()) {
+            throw InvalidImageError("code unit is too large");
+        }
+
+        const auto begin = static_cast<std::uint32_t>(loaded->code_.size());
+        loaded->code_.insert(loaded->code_.end(), chunk.code.begin(), chunk.code.end());
+        const auto end = static_cast<std::uint32_t>(loaded->code_.size());
+
+        std::vector<UpvalueInfo> upvalues;
+        upvalues.reserve(chunk.upvalue_infos.size());
+        for (const suru::ir::UpvalueInfo info : chunk.upvalue_infos) {
+            upvalues.push_back(UpvalueInfo {
+                info.source == suru::ir::UpvalueSource::Local
+                    ? UpvalueSource::Local : UpvalueSource::Upvalue,
+                info.index,
+            });
+        }
+        loaded->chunks_.push_back(Chunk {
+            chunk.name, begin, end, chunk.arity, chunk.slots, std::move(upvalues)
+        });
+    }
+
+    CodeUnit* raw = loaded.get();
+    code_units_.push_back(std::move(loaded));
+    return make_closure(raw, image.entry_chunk);
+}
+
+[[noreturn]] void VM::raise(Value payload) {
+    std::ostringstream out;
+    switch (payload.kind) {
+        case ValueKind::Nil: out << "nil"; break;
+        case ValueKind::Boolean: out << (payload.bool_ ? "true" : "false"); break;
+        case ValueKind::Number: out << payload.number_; break;
+        case ValueKind::String:
+            out << (payload.string_ == nullptr ? "<null-string>" : payload.string_->view());
+            break;
+        case ValueKind::Array: out << "<array>"; break;
+        case ValueKind::Table: out << "<table>"; break;
+        case ValueKind::Closure: out << "<function>"; break;
+    }
+    throw RaisedError(payload, out.str());
 }
 
 Upvalue* VM::make_upvalue() {

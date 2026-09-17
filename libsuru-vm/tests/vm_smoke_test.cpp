@@ -1,6 +1,7 @@
 #include "suru/vm/vm.hpp"
 #include "suru/vm/opcode.hpp"
 #include "suru/lib/lib.hpp"
+#include "suru/vm/raised_error.hpp"
 
 #include <limits>
 
@@ -411,12 +412,12 @@ TEST(VmSmokeTest, ArrayCreateReadWriteAndNegativeIndex) {
     cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 1, 0));
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 1));
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 3, 4));
-    cu->code_.push_back(pack_abc(suru::vm::Op::SetArray, 1, 2, 3));
+    cu->code_.push_back(pack_abc(suru::vm::Op::SetIndex, 1, 2, 3));
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 2));
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 3, 5));
-    cu->code_.push_back(pack_abc(suru::vm::Op::SetArray, 1, 2, 3));
+    cu->code_.push_back(pack_abc(suru::vm::Op::SetIndex, 1, 2, 3));
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 3));
-    cu->code_.push_back(pack_abc(suru::vm::Op::GetArray, 4, 1, 2));
+    cu->code_.push_back(pack_abc(suru::vm::Op::GetIndex, 4, 1, 2));
     cu->code_.push_back(pack_abx(suru::vm::Op::Len, 5, 1));
     cu->code_.push_back(pack_abx(suru::vm::Op::Return, 4, 2));
     const std::uint32_t end = to_u32(cu->code_.size());
@@ -448,7 +449,7 @@ TEST(VmSmokeTest, ArrayIndexOutOfBoundsThrows) {
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
     cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 1, 0));
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 1));
-    cu->code_.push_back(pack_abc(suru::vm::Op::GetArray, 3, 1, 2));
+    cu->code_.push_back(pack_abc(suru::vm::Op::GetIndex, 3, 1, 2));
     cu->code_.push_back(pack_abx(suru::vm::Op::Return, 0, 0));
     const std::uint32_t end = to_u32(cu->code_.size());
 
@@ -542,8 +543,8 @@ TEST(VmSmokeTest, SupportsImmediateArrayOperands) {
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 0, 0));
     cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 1, 4, true));        // len immediate 4
     cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 1));                 // -1
-    cu->code_.push_back(pack_abc(suru::vm::Op::SetArray, 1, 2, 0));           // arr[-1] = 7
-    cu->code_.push_back(pack_abc_i(suru::vm::Op::GetArray, 3, 1, 0x1FFU, true)); // arr[#-1]
+    cu->code_.push_back(pack_abc(suru::vm::Op::SetIndex, 1, 2, 0));           // arr[-1] = 7
+    cu->code_.push_back(pack_abc_i(suru::vm::Op::GetIndex, 3, 1, 0x1FFU, true)); // arr[#-1]
     cu->code_.push_back(pack_abx(suru::vm::Op::Len, 4, 1));
     cu->code_.push_back(pack_abx(suru::vm::Op::Return, 3, 2));
     const std::uint32_t end = to_u32(cu->code_.size());
@@ -633,7 +634,7 @@ TEST(VmSmokeTest, SupportsSetUpvalueImmediate) {
     EXPECT_EQ(out.number_, 101.0);
 }
 
-TEST(VmSmokeTest, SupportsRegisterGlobalAndArrayI) {
+TEST(VmSmokeTest, SupportsRegisterGlobalAndImmediateIndex) {
     suru::vm::VM vm;
 
     suru::vm::CodeUnit* cu = vm.make_code_unit();
@@ -647,13 +648,14 @@ TEST(VmSmokeTest, SupportsRegisterGlobalAndArrayI) {
     cu->code_.push_back(pack_abx(suru::vm::Op::SetGlobal, 0, 123, true));        // G[R0] = #123
     cu->code_.push_back(pack_abx(suru::vm::Op::GetGlobal, 0, 1));                // R1 = G[R0]
     cu->code_.push_back(pack_abx(suru::vm::Op::NewArray, 2, 3, true));           // R2 = newarray(3)
-    cu->code_.push_back(pack_abc_i(suru::vm::Op::SetArrayI, 2, 0xFFU, 77, true)); // R2[I[-1]] = #77
-    cu->code_.push_back(pack_abc(suru::vm::Op::GetArrayI, 3, 0xFFU, 2));         // R3 = R2[I[-1]]
+    cu->code_.push_back(pack_abx(suru::vm::Op::Load, 5, 77, true));               // R5 = #77
+    cu->code_.push_back(pack_abc_i(suru::vm::Op::SetIndex, 2, 0xFFU, 5, true));   // R2[#-1] = R5
+    cu->code_.push_back(pack_abc_i(suru::vm::Op::GetIndex, 3, 2, 0x1FFU, true));  // R3 = R2[#-1]
     cu->code_.push_back(pack_abx(suru::vm::Op::Len, 4, 2));                       // R4 = len(R2)
     cu->code_.push_back(pack_abx(suru::vm::Op::Return, 1, 4));
     const std::uint32_t end = to_u32(cu->code_.size());
 
-    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 5, {}});
+    cu->chunks_.push_back(suru::vm::Chunk {"main", begin, end, 0, 6, {}});
     suru::vm::Closure* entry = vm.make_closure(cu, 0);
     ASSERT_NE(entry, nullptr);
     vm.push_value(suru::vm::Value::closure(entry));
@@ -671,4 +673,54 @@ TEST(VmSmokeTest, SupportsRegisterGlobalAndArrayI) {
     EXPECT_EQ(global_out.number_, 123.0);
     EXPECT_EQ(arr_out.number_, 77.0);
     EXPECT_EQ(len_out.number_, 3.0);
+}
+
+TEST(VmSmokeTest, UnifiedIndexDispatchesToTableAndRejectsNanKey) {
+    suru::vm::VM vm;
+    auto* cu = vm.make_code_unit();
+    cu->constants_.push_back(suru::vm::Value::string(vm.make_string("key")));
+    cu->constants_.push_back(suru::vm::Value::number(42));
+    cu->code_.push_back(pack_abx(suru::vm::Op::NewTable, 0, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 1, 0));
+    cu->code_.push_back(pack_abx(suru::vm::Op::LoadK, 2, 1));
+    cu->code_.push_back(pack_abc(suru::vm::Op::SetIndex, 0, 1, 2));
+    cu->code_.push_back(pack_abc(suru::vm::Op::GetIndex, 3, 0, 1));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Return, 3, 1));
+    cu->chunks_.push_back({"main", 0, to_u32(cu->code_.size()), 0, 4, {}});
+    vm.push_value(suru::vm::Value::closure(vm.make_closure(cu, 0)));
+    ASSERT_NO_THROW(vm.call(0, 1));
+    EXPECT_EQ(vm.pop_value().number_, 42);
+
+    suru::vm::Table* table = vm.make_table();
+    EXPECT_FALSE(table->set(suru::vm::Value::number(std::numeric_limits<double>::quiet_NaN()),
+                            suru::vm::Value::number(1)));
+}
+
+TEST(VmSmokeTest, RaisePreservesPayloadFromBytecodeAndCApi) {
+    suru::vm::VM vm;
+    auto* cu = vm.make_code_unit();
+    cu->code_.push_back(pack_abx(suru::vm::Op::Load, 0, 17, true));
+    cu->code_.push_back(pack_abx(suru::vm::Op::Raise, 0, 0));
+    cu->chunks_.push_back({"main", 0, to_u32(cu->code_.size()), 0, 1, {}});
+    vm.push_value(suru::vm::Value::closure(vm.make_closure(cu, 0)));
+    try {
+        vm.call(0, 0);
+        FAIL() << "expected RaisedError";
+    } catch (const suru::vm::RaisedError& error) {
+        EXPECT_EQ(error.payload().kind, suru::vm::ValueKind::Number);
+        EXPECT_EQ(error.payload().number_, 17);
+    }
+
+    auto* cfunc = vm.make_closure_c([](suru::vm::VM* current) {
+        current->raise(suru::vm::Value::boolean(true));
+    }, 0);
+    vm.push_value(suru::vm::Value::closure(cfunc));
+    try {
+        vm.call(0, 0);
+        FAIL() << "expected RaisedError";
+    } catch (const suru::vm::RaisedError& error) {
+        EXPECT_EQ(error.payload().kind, suru::vm::ValueKind::Boolean);
+        EXPECT_TRUE(error.payload().bool_);
+    }
+    EXPECT_EQ(vm.stack_top(), 0U);
 }

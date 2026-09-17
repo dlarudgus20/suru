@@ -10,11 +10,12 @@ namespace {
 
 const std::unordered_map<std::string, TokenKind>& keywords() {
     static const std::unordered_map<std::string, TokenKind> table {
-        {"and", TokenKind::KwAnd},       {"break", TokenKind::KwBreak}, {"do", TokenKind::KwDo},
+        {"and", TokenKind::KwAnd},       {"break", TokenKind::KwBreak},
+        {"continue", TokenKind::KwContinue}, {"do", TokenKind::KwDo},
         {"else", TokenKind::KwElse},     {"elseif", TokenKind::KwElseIf},
         {"end", TokenKind::KwEnd},       {"false", TokenKind::KwFalse}, {"for", TokenKind::KwFor},
         {"fn", TokenKind::KwFunction},
-        {"goto", TokenKind::KwGoto},     {"if", TokenKind::KwIf},       {"in", TokenKind::KwIn},
+        {"if", TokenKind::KwIf},         {"in", TokenKind::KwIn},
         {"local", TokenKind::KwLocal},   {"nil", TokenKind::KwNil},     {"not", TokenKind::KwNot},
         {"or", TokenKind::KwOr},         {"repeat", TokenKind::KwRepeat},
         {"return", TokenKind::KwReturn}, {"then", TokenKind::KwThen},   {"true", TokenKind::KwTrue},

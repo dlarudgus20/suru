@@ -141,6 +141,11 @@ std::size_t resolve_array_index(std::size_t len, Value value) {
     if (std::modf(raw, &integral) != 0.0) {
         throw TypeError("array index must be integer");
     }
+    constexpr double int64_min = -9223372036854775808.0;
+    constexpr double int64_limit = 9223372036854775808.0;
+    if (integral < int64_min || integral >= int64_limit) {
+        throw TypeError("array index out of bounds");
+    }
     std::int64_t idx = static_cast<std::int64_t>(integral);
     if (idx < 0) {
         idx = static_cast<std::int64_t>(len) + idx;
@@ -149,6 +154,11 @@ std::size_t resolve_array_index(std::size_t len, Value value) {
         throw TypeError("array index out of bounds");
     }
     return static_cast<std::size_t>(idx);
+}
+
+bool valid_table_key(Value key) {
+    return key.kind != ValueKind::Nil
+        && !(key.kind == ValueKind::Number && std::isnan(key.number_));
 }
 
 } // namespace
@@ -603,55 +613,52 @@ void VM::run(std::size_t target_depth) {
                 reg_write(w.a, Value::array(make_array(to_array_length(reg_read(w.bx)))));
                 break;
             }
-            case Op::GetTable: {
+            case Op::GetIndex: {
                 const auto w = decode_abc(word);
-                Table* table = reg_read(w.b).as_table("gettable");
-                Value out = Value::nil();
-                if (!table->get(reg_read(w.c), &out)) {
-                    out = Value::nil();
+                const Value object = reg_read(w.b);
+                const Value key = w.i
+                    ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
+                if (object.kind == ValueKind::Table) {
+                    if (!valid_table_key(key)) {
+                        throw TableError("table key must not be nil or NaN");
+                    }
+                    Value out = Value::nil();
+                    if (!object.as_table("getindex")->get(key, &out)) {
+                        out = Value::nil();
+                    }
+                    reg_write(w.a, out);
+                    break;
                 }
-                reg_write(w.a, out);
-                break;
-            }
-            case Op::GetArray: {
-                const auto w = decode_abc(word);
-                Array* array = reg_read(w.b).as_array("getarray");
-                const Value idx_v = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
-                const std::size_t idx = resolve_array_index(array->elements.size(), idx_v);
-                reg_write(w.a, array->elements[idx]);
-                break;
-            }
-            case Op::SetTable: {
-                const auto w = decode_abc(word);
-                Table* table = reg_read(w.a).as_table("settable");
-                const Value value = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
-                if (!table->set(reg_read(w.b), value)) {
-                    throw TableError("failed to set table key");
+                if (object.kind == ValueKind::Array) {
+                    Array* array = object.as_array("getindex");
+                    const std::size_t idx = resolve_array_index(array->elements.size(), key);
+                    reg_write(w.a, array->elements[idx]);
+                    break;
                 }
-                break;
+                throw TypeError("getindex: expected table/array");
             }
-            case Op::SetArray: {
+            case Op::SetIndex: {
                 const auto w = decode_abc(word);
-                Array* array = reg_read(w.a).as_array("setarray");
-                const std::size_t idx = resolve_array_index(array->elements.size(), reg_read(w.b));
-                array->elements[idx] = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
-                break;
-            }
-            case Op::GetArrayI: {
-                const auto w = decode_abc(word);
-                Array* array = reg_read(w.c).as_array("getarrayi");
-                const Value idx_v = Value::number(static_cast<double>(w.imm_b()));
-                const std::size_t idx = resolve_array_index(array->elements.size(), idx_v);
-                reg_write(w.a, array->elements[idx]);
-                break;
-            }
-            case Op::SetArrayI: {
-                const auto w = decode_abc(word);
-                Array* array = reg_read(w.a).as_array("setarrayi");
-                const Value idx_v = Value::number(static_cast<double>(w.imm_b()));
-                const std::size_t idx = resolve_array_index(array->elements.size(), idx_v);
-                array->elements[idx] = w.i ? Value::number(static_cast<double>(w.imm_c())) : reg_read(w.c);
-                break;
+                const Value object = reg_read(w.a);
+                const Value key = w.i
+                    ? Value::number(static_cast<double>(w.imm_b())) : reg_read(w.b);
+                const Value value = reg_read(w.c);
+                if (object.kind == ValueKind::Table) {
+                    if (!valid_table_key(key)) {
+                        throw TableError("table key must not be nil or NaN");
+                    }
+                    if (!object.as_table("setindex")->set(key, value)) {
+                        throw TableError("failed to set table key");
+                    }
+                    break;
+                }
+                if (object.kind == ValueKind::Array) {
+                    Array* array = object.as_array("setindex");
+                    const std::size_t idx = resolve_array_index(array->elements.size(), key);
+                    array->elements[idx] = value;
+                    break;
+                }
+                throw TypeError("setindex: expected table/array");
             }
             case Op::PushArrayX: {
                 const auto w = decode_abc(word);
@@ -869,6 +876,9 @@ void VM::run(std::size_t target_depth) {
                 }
                 close_upvalues(frame.base + 1U + w.a);
                 break;
+            }
+            case Op::Raise: {
+                raise(reg_read(decode_abx(word).a));
             }
             case Op::GetUpvalue: {
                 const auto w = decode_abx(word);

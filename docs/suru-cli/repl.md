@@ -1,29 +1,47 @@
-# REPL Behavior
+# Suru CLI and REPL
 
-## 실행 모드
-- `suru` 단독 실행: REPL 시작
-- `suru <file>`: 파일 파싱 후 트리 출력
+## File and batch modes
 
-## 입력 처리
-REPL은 `ParseContext`를 사용해 라인 단위 입력을 누적 파싱한다.
-입력 라인마다 `parse(line + "\n", context)`를 호출한다.
+| Command | Behavior |
+| --- | --- |
+| `suru file.suru` | Compile and execute source |
+| `suru file.sbc` | Load binary IR and execute |
+| `suru --ast file.suru` | Write typed AST as YAML |
+| `suru --ast file.suru -o out.yaml` | Save YAML AST |
+| `suru --ir file.suru` | Write binary IR to stdout |
+| `suru --ir file.suru -o out.sbc` | Save binary IR |
 
-## 상태 전이
-- `ParseStatus::Ok`
-  - 현재 누적 입력이 완전한 구문
-  - 트리를 출력하고 다음 입력으로 진행
-- `ParseStatus::Incomplete`
-  - 입력이 아직 닫히지 않음
-  - 추가 입력을 기다림
-- `ParseStatus::Error`
-  - 진단 메시지 출력
-  - 입력 버퍼를 비우고 다음 입력으로 진행
+`--ast` and `--ir` are mutually exclusive. Execute mode rejects `-o`.
 
-## 프롬프트
-- 기본 프롬프트: `> `
-- 이어쓰기 프롬프트: `>> ` (`Incomplete` 상태에서 사용)
+Batch stdin is explicit.
 
-## REPL 종료
-첫 줄 상태에서 아래 명령을 입력하면 종료한다.
-- `.exit`
-- `.quit`
+```sh
+suru -
+suru --ast -
+suru --ir - -o out.sbc
+```
+
+## REPL modes
+
+If no input path is present, the selected mode starts a REPL.
+
+| Command | REPL output |
+| --- | --- |
+| `suru` | Compile and execute each complete input |
+| `suru --ast` | YAML AST |
+| `suru --ir` | Reassemblable `.sura` disassembly |
+
+Prompts go to stderr, so stdout can be redirected cleanly. `> ` is the normal prompt and `>> ` indicates incomplete input. `.exit` and `.quit` exit when entered as a fresh input.
+
+`-o` is not accepted in REPL mode. Execute REPL keeps one VM, so globals survive between entries; source-local bindings do not.
+
+## Bytecode utility
+
+`suru-bc` is the thin assembly/image utility.
+
+```sh
+suru-bc input.sura
+suru-bc input.sura -o output.sbc
+suru-bc input.sbc
+suru-bc --disassemble input.sbc -o output.sura
+```

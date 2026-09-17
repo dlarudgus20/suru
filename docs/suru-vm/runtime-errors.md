@@ -1,6 +1,7 @@
 # Suru Runtime Errors
 
 ## 오류 분류
+- `RaisedError`: `RAISE` 또는 `VM::raise()`가 전달한 임의의 `Value` payload
 - `TypeError`: 타입이 맞지 않는 연산/변환
 - `ApiError`: VM C++ API 사용 오류
 - `TableError`: 테이블 키/값 접근 또는 갱신 실패
@@ -17,4 +18,6 @@
 
 ## 처리 원칙
 - 치명적 런타임 오류 발생 시 현재 실행을 중단하고 즉시 실패 처리한다.
-- `suru-bc`는 `runtime error [Category]: message` 형식으로 출력한다.
+- VM은 예외 경로에서도 해당 호출이 만든 프레임, 스택 영역, open upvalue를 정리한 뒤 예외를 다시 던진다.
+- `RaisedError::payload()`는 변환 전 원래 값을 반환한다.
+- CLI는 현재 `runtime error: message` 형식으로 출력한다.

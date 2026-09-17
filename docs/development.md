@@ -3,7 +3,7 @@
 ## 개발 환경
 - 언어/표준: C++23
 - 빌드 시스템: CMake
-- 주요 타깃: `libsuru`, `libsuru-vm`, `suru`
+- 주요 타깃: `libsuru-ir`, `libsuru-vm`, `libsuru`, `suru`, `suru-bc`
 
 ## 자주 쓰는 명령
 - 구성: `cmake -S . -B build`
@@ -15,13 +15,16 @@ Windows 실행 파일 예시:
 
 ## 코드 경계 원칙
 - 프론트엔드 API: `suru::front`
+- IR API: `suru::ir`
 - VM API: `suru::vm`
-- 현재 단계에서 `libsuru`와 `suru`는 `libsuru-vm`에 의존하지 않는다.
+- `libsuru`는 `libsuru-ir`에 의존하지만 `libsuru-vm`에는 의존하지 않는다.
+- `suru` 실행 파일이 compiler, IR, VM을 조합한다.
 
 ## 문서 기준
-- 문법 정의: `docs/suru/syntax.md` (원문 유지)
-- 언어 동작: `docs/suru/language-spec.md`
-- VM 바이트코드: `docs/suru-vm/bytecode-spec.md`
+- 문법 정의: `docs/suru/syntax.md`
+- 언어 동작: `docs/suru/semantics-overview.md`
+- Compiler: `docs/suru/compiler.md`
+- VM 바이트코드: `docs/suru-vm/bytecode.md`
 
 ## 텍스트 파일 규칙(Windows 기준)
 - 줄바꿈: CRLF

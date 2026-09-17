@@ -1,65 +1,54 @@
-# Suru Semantics: Control Flow and Functions
+# Suru Control Flow and Functions
 
-## 제어 흐름
-Normative Rule:
-- `if`: 조건이 truthy인 첫 분기 블록 실행
-- `while`: 조건이 truthy인 동안 반복
-- `repeat`: 블록 1회 실행 후 조건 검사, truthy면 종료
-- `break`: 가장 안쪽 루프 즉시 종료
+## Branches and loops
 
-Inference Rule:
-```text
-truthy(cond) = true  => execute(then_block)
-truthy(cond) = false => try next branch
-```
+`if`는 truthy인 첫 branch를 실행한다. `while`은 본문 전에, `repeat`는 본문 뒤에 조건을 검사한다.
 
-Example:
+Numeric `for`의 limit은 exclusive다. 초기값·limit·step은 loop 진입 때 한 번만 평가한다.
+
 ```lua
-local x = 0
-while x < 3 do
-  x = x + 1
+for i = 0, 3 do
+    -- i: 0, 1, 2
 end
-return x
 ```
 
-Suru Note:
-- 현재 코드는 파싱 중심이며, 실제 제어 흐름 실행은 런타임 단계에서 구현한다.
+양수 step은 `i < limit`, 음수 step은 `i > limit`인 동안 돈다. 상수 0 step은 compile error고 동적으로 얻은 0은 `RAISE`를 통한 runtime error다.
 
-## 함수 정의와 호출
-Normative Rule:
-- `fn`은 함수 값을 만든다.
-- 호출 시 인자를 새 호출 프레임의 파라미터에 바인딩한다.
-- 본문 실행 후 반환값 목록을 호출자에게 돌려준다.
+Generic `for`는 expression list를 iterator, state, control 세 값으로 조정한다. 매 반복마다 `iterator(state, control)`을 호출하고 첫 결과가 `nil`이면 종료하며, 첫 결과를 다음 control로 사용한다.
 
-Inference Rule:
-```text
-call(f, args) => run(body, Env_f + params->args) => returns
-```
+Loop에는 label을 붙일 수 있다.
 
-Example:
 ```lua
-local fn add2(x)
-  return x, x + 1
+outer: while ready do
+    for i = 0, 10 do
+        if done then break outer end
+        if skip then continue outer end
+    end
 end
-return add2(2)
 ```
 
-Suru Note:
-- 함수 키워드는 `function`이 아니라 `fn`이다.
+제어 이동은 빠져나가는 lexical scope의 captured local을 `CLOSE`한 뒤 수행한다.
 
-## 반환(다중 반환 포함)
-Normative Rule:
-- `return`은 값 없이 종료하거나, 하나 이상의 값을 반환할 수 있다.
-- `return e1, e2, ...`는 값 목록을 순서대로 반환한다.
+## Functions and methods
 
-Inference Rule:
-```text
-return               => Ret([])
-return e1, e2, ...   => Ret([v1, v2, ...])
-```
+`fn` expression은 closure를 만든다. `local fn name(...)`은 closure를 만들기 전에 local binding을 공개하므로 자기 재귀가 가능하다.
 
-Example:
+일반 `local name = initializer`는 initializer 평가가 끝난 뒤 새 binding을 공개한다.
+
+Method 선언과 호출은 receiver를 정확히 한 번 평가한다.
+
 ```lua
-return
-return 1, 2, 3
+fn object:add(x)
+    self.value = self.value + x
+end
+
+object:add(2)
 ```
+
+Method body의 첫 고정 인자는 암시적 `self`다.
+
+## Varargs and returns
+
+`...`는 현재 vararg function의 고정 parameter 뒤에 전달된 extra arguments다. Nested function은 바깥 `...`를 자동 capture하지 않는다.
+
+Compiler는 vararg function의 prologue에 `VARGPREP <fixed-arity>`를 생성한다. `return`과 호출 인자는 multiple-value adjustment를 따른다.

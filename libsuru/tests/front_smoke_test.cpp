@@ -29,9 +29,35 @@ TEST(FrontSmokeTest, SemicolonDoesNotCreateEmptyStatement) {
     EXPECT_EQ(dumped.find("kind: 'EmptyStatement'"), std::string::npos);
 }
 
-TEST(FrontSmokeTest, RejectsLongStringSyntax) {
+TEST(FrontSmokeTest, BracketsAreArrayConstructorsNotLongStrings) {
     auto result = suru::front::parse("return [[abc]]");
-    EXPECT_FALSE(result.ok());
+    ASSERT_TRUE(result.ok());
+    const std::string dumped = suru::front::dump(result.tree);
+    EXPECT_NE(dumped.find("kind: 'ArrayConstructor'"), std::string::npos);
+}
+
+TEST(FrontSmokeTest, ParsesConfirmedControlAndLiteralSyntax) {
+    auto result = suru::front::parse(R"(
+outer: while true do
+    local a = [1, 2, 3]
+    local t = {name = "suru", (a[0]) = true}
+    if t.name then continue outer end
+    break outer
+end
+)");
+    ASSERT_TRUE(result.ok());
+    const std::string dumped = suru::front::dump(result.tree);
+    EXPECT_NE(dumped.find("kind: 'ContinueStatement'"), std::string::npos);
+    EXPECT_NE(dumped.find("label: 'outer'"), std::string::npos);
+    EXPECT_NE(dumped.find("kind: 'TableConstructor'"), std::string::npos);
+}
+
+TEST(FrontSmokeTest, RejectsRemovedGotoLabelsAttributesAndImplicitTableFields) {
+    EXPECT_FALSE(suru::front::parse("goto done").ok());
+    EXPECT_FALSE(suru::front::parse("::done::").ok());
+    EXPECT_FALSE(suru::front::parse("local x <close> = 1").ok());
+    EXPECT_FALSE(suru::front::parse("return {1, 2}").ok());
+    EXPECT_FALSE(suru::front::parse("return {[x] = 1}").ok());
 }
 
 TEST(FrontSmokeTest, ExponentRollbackKeepsLocations) {
@@ -142,4 +168,3 @@ TEST(FrontSmokeTest, UsesCaretForXorAndDoubleCaretForPower) {
     auto old_xor = suru::front::parse("return 1 ~ 2");
     EXPECT_FALSE(old_xor.ok());
 }
-

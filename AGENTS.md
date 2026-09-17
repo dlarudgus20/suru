@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## 목적
-이 저장소는 Lua-like 스크립트 언어 **Suru**를 학습용으로 구현한다. 현재 1차 목표는 소스 코드를 파싱해 트리(YAML 스타일)를 출력하는 것이다.
+이 저장소는 Lua-like 스크립트 언어 **Suru**를 학습용으로 구현한다. Source를 typed AST로 parse하고 resolve/codegen하여 독립 IR image를 만든 뒤 VM에서 실행한다.
 
 ## 커뮤니케이션 규칙
 - 기본 작업 언어는 **한국어**다.
@@ -10,11 +10,11 @@
 
 ## 프로젝트 구조
 - `libsuru/`: 프론트엔드 라이브러리 (`suru::front`)
-  - `include/suru/front`: 공개 API (`token`, `lexer`, `parser`, `parse`, `dump`)
-  - `src`: 렉서/파서/세션 파서/덤퍼 구현
-  - `tests/front_smoke_test.cpp`
+  - `include/suru/front`: lexer, typed AST, parser, resolver, compiler 공개 API
+  - `src`: parser/YAML dump/resolver/direct codegen 구현
+- `libsuru-ir/`: VM 독립 bytecode image, codec, assembler/disassembler, binary I/O (`suru::ir`)
 - `libsuru-vm/`: VM 라이브러리 (`suru::vm`) 및 바이트코드 구조
-- `suru/`: CLI 실행 파일, REPL 및 파일 파싱 진입점
+- `suru/`: source/`.sbc` 실행, AST/IR 출력, REPL 진입점
 - `docs/`: 언어/바이트코드 명세 문서
 
 ## 작업 기억 문서
@@ -27,10 +27,12 @@
 - 테스트: `ctest --test-dir build -C Debug --output-on-failure`
 - CLI 실행(Windows): `build\\suru\\Debug\\suru.exe`
   - `suru` 단독 실행: REPL
-  - `suru <file.suru>`: 파일 파싱 트리 출력
+  - `suru <file.suru>`: source compile 및 실행
+  - `suru --ast <file.suru>`: YAML typed AST 출력
+  - `suru --ir <file.suru>`: binary IR 출력
 
 ## 코딩 스타일
-- C++23 기준, 네임스페이스는 `suru::front`, `suru::vm` 사용.
+- C++23 기준, 네임스페이스는 `suru::front`, `suru::ir`, `suru::vm` 사용.
 - 헤더는 모듈 경계를 명확히 유지한다. (`parser.hpp`는 `parse.hpp`에 의존하지 않음)
 - 파싱 루트 노드는 `Block`이다(이전 `Chunk` 사용 금지).
 

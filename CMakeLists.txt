@@ -22,6 +22,7 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+add_subdirectory(libsuru-ir)
 add_subdirectory(libsuru-vm)
 add_subdirectory(libsuru)
 add_subdirectory(suru)

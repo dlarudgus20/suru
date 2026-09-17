@@ -5,11 +5,19 @@
 
 ## 테스트 목록
 - `front_smoke_test` (`libsuru/tests/front_smoke_test.cpp`)
-  - 파서 성공/실패/불완전 입력 상태를 확인한다.
+  - typed AST parser, 확정/제거 문법, 불완전 입력을 확인한다.
+- `compiler_test` (`libsuru/tests/compiler_test.cpp`)
+  - resolver/upvalue, direct codegen, multiple values, loop, method, lexical 규칙을 실행 검증한다.
+- `ir_test` (`libsuru-ir/tests/ir_test.cpp`)
+  - assembly/disassembly, 무버전 binary round trip, `@vret` 문법을 확인한다.
 - `cli_smoke_test` (`suru/tests/cli_smoke_test.cpp`)
   - CLI 실행 가능 여부를 확인한다.
 - `vm_smoke_test` (`libsuru-vm/tests/vm_smoke_test.cpp`)
-  - 기본 바이트코드 실행 결과를 확인한다.
+  - 기본 bytecode, 통합 index, NaN table key, `RAISE` payload를 확인한다.
+- `vm_vararg_test` (`libsuru-vm/tests/vm_vararg_test.cpp`)
+  - vararg/multret, 지연·반복 prep, open range, upvalue 수명을 확인한다.
+- `source_cli_test` (`suru/tests/source_cli_test.py`)
+  - 실행/`--ast`/`--ir`, `.sbc`, batch stdin, 세 REPL을 확인한다.
 - `suru_bc_upvalue_test` (`tests/upvalue.sura`)
   - upvalue 캡처 및 `GETUPVAL`/`SETUPVAL` 실행 경로를 확인한다.
 - `suru_bc_div_test` (`tests/div.sura`)
@@ -20,8 +28,8 @@
   - 배열 생성/읽기/쓰기 및 음수 인덱스 동작을 확인한다.
 - `suru_bc_immediate_test` (`tests/immediate.sura`)
   - immediate 규약(`RI[C]`, `RI[Bx]`)과 관련 opcode 경로를 확인한다.
-- `suru_bc_global_arrayi_test` (`tests/global_arrayi.sura`)
-  - `GETGLOBAL`/`SETGLOBAL` 및 `GETARRAYI`/`SETARRAYI` 경로를 확인한다.
+- `suru_bc_global_index_test` (`tests/global_index.sura`)
+  - `GETGLOBAL`/`SETGLOBAL` 및 immediate `GETINDEX`/`SETINDEX` 경로를 확인한다.
 - `suru_bc_emit_sbc_test`
   - `suru-bc -o`로 `.sbc` 파일 저장 경로를 확인한다.
 - `suru_bc_run_sbc_test`

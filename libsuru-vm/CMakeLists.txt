@@ -10,6 +10,8 @@ target_include_directories(libsuru-vm
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_link_libraries(libsuru-vm PUBLIC libsuru-ir)
+
 target_compile_features(libsuru-vm PUBLIC cxx_std_23)
 
 if(BUILD_TESTING)

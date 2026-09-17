@@ -7,6 +7,7 @@
 namespace suru::vm {
 
 enum class RuntimeErrorCategory {
+    Raised,
     Type,
     Api,
     Table,
@@ -77,4 +78,3 @@ public:
 };
 
 } // namespace suru::vm
-

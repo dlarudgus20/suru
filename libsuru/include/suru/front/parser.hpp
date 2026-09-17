@@ -2,28 +2,15 @@
 
 #include <cstddef>
 #include <string>
-#include <utility>
 #include <vector>
 
-#include "suru/front/token.hpp"
+#include "suru/front/ast.hpp"
 
 namespace suru::front {
 
 struct Diagnostic {
     SourceLocation location;
     std::string message;
-};
-
-struct ParseNode {
-    std::string kind;
-    SourceLocation location;
-    std::vector<std::pair<std::string, std::string>> attributes;
-    std::vector<std::pair<std::string, ParseNode>> nodes;
-    std::vector<std::pair<std::string, std::vector<ParseNode>>> lists;
-};
-
-struct ParseTree {
-    ParseNode root;
 };
 
 enum class ParseStatus {
