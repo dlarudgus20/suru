@@ -37,7 +37,7 @@ public:
             }
             tokens.push_back(scan_token());
         }
-        tokens.push_back(Token {TokenKind::EndOfFile, "", location_});
+        tokens.push_back(Token {TokenKind::EndOfFile, "", {location_, location_}});
         return tokens;
     }
 
@@ -109,84 +109,84 @@ private:
         case '"': return scan_string(loc, ch);
         case '[':
             advance();
-            return Token {TokenKind::LBracket, "[", loc};
-        case ']': advance(); return Token {TokenKind::RBracket, "]", loc};
-        case '{': advance(); return Token {TokenKind::LBrace, "{", loc};
-        case '}': advance(); return Token {TokenKind::RBrace, "}", loc};
-        case '(': advance(); return Token {TokenKind::LParen, "(", loc};
-        case ')': advance(); return Token {TokenKind::RParen, ")", loc};
-        case ';': advance(); return Token {TokenKind::Semicolon, ";", loc};
-        case ',': advance(); return Token {TokenKind::Comma, ",", loc};
-        case '+': advance(); return Token {TokenKind::Plus, "+", loc};
-        case '-': advance(); return Token {TokenKind::Minus, "-", loc};
-        case '*': advance(); return Token {TokenKind::Star, "*", loc};
-        case '%': advance(); return Token {TokenKind::Percent, "%", loc};
+            return Token {TokenKind::LBracket, "[", {loc, location_}};
+        case ']': advance(); return Token {TokenKind::RBracket, "]", {loc, location_}};
+        case '{': advance(); return Token {TokenKind::LBrace, "{", {loc, location_}};
+        case '}': advance(); return Token {TokenKind::RBrace, "}", {loc, location_}};
+        case '(': advance(); return Token {TokenKind::LParen, "(", {loc, location_}};
+        case ')': advance(); return Token {TokenKind::RParen, ")", {loc, location_}};
+        case ';': advance(); return Token {TokenKind::Semicolon, ";", {loc, location_}};
+        case ',': advance(); return Token {TokenKind::Comma, ",", {loc, location_}};
+        case '+': advance(); return Token {TokenKind::Plus, "+", {loc, location_}};
+        case '-': advance(); return Token {TokenKind::Minus, "-", {loc, location_}};
+        case '*': advance(); return Token {TokenKind::Star, "*", {loc, location_}};
+        case '%': advance(); return Token {TokenKind::Percent, "%", {loc, location_}};
         case '^':
             advance();
             if (match('^')) {
-                return Token {TokenKind::Pow, "^^", loc};
+                return Token {TokenKind::Pow, "^^", {loc, location_}};
             }
-            return Token {TokenKind::Caret, "^", loc};
-        case '#': advance(); return Token {TokenKind::Hash, "#", loc};
-        case '&': advance(); return Token {TokenKind::Amp, "&", loc};
-        case '|': advance(); return Token {TokenKind::Pipe, "|", loc};
+            return Token {TokenKind::Caret, "^", {loc, location_}};
+        case '#': advance(); return Token {TokenKind::Hash, "#", {loc, location_}};
+        case '&': advance(); return Token {TokenKind::Amp, "&", {loc, location_}};
+        case '|': advance(); return Token {TokenKind::Pipe, "|", {loc, location_}};
         case '/':
             advance();
             if (match('/')) {
-                return Token {TokenKind::SlashSlash, "//", loc};
+                return Token {TokenKind::SlashSlash, "//", {loc, location_}};
             }
-            return Token {TokenKind::Slash, "/", loc};
+            return Token {TokenKind::Slash, "/", {loc, location_}};
         case '=':
             advance();
             if (match('=')) {
-                return Token {TokenKind::EqEq, "==", loc};
+                return Token {TokenKind::EqEq, "==", {loc, location_}};
             }
-            return Token {TokenKind::Assign, "=", loc};
+            return Token {TokenKind::Assign, "=", {loc, location_}};
         case '!':
             advance();
             if (match('=')) {
-                return Token {TokenKind::NotEq, "!=", loc};
+                return Token {TokenKind::NotEq, "!=", {loc, location_}};
             }
-            return Token {TokenKind::Unknown, "!", loc};
+            return Token {TokenKind::Unknown, "!", {loc, location_}};
         case '~':
             advance();
-            return Token {TokenKind::Tilde, "~", loc};
+            return Token {TokenKind::Tilde, "~", {loc, location_}};
         case '<':
             advance();
             if (match('=')) {
-                return Token {TokenKind::LessEq, "<=", loc};
+                return Token {TokenKind::LessEq, "<=", {loc, location_}};
             }
             if (match('<')) {
-                return Token {TokenKind::ShiftLeft, "<<", loc};
+                return Token {TokenKind::ShiftLeft, "<<", {loc, location_}};
             }
-            return Token {TokenKind::Less, "<", loc};
+            return Token {TokenKind::Less, "<", {loc, location_}};
         case '>':
             advance();
             if (match('=')) {
-                return Token {TokenKind::GreaterEq, ">=", loc};
+                return Token {TokenKind::GreaterEq, ">=", {loc, location_}};
             }
             if (match('>')) {
-                return Token {TokenKind::ShiftRight, ">>", loc};
+                return Token {TokenKind::ShiftRight, ">>", {loc, location_}};
             }
-            return Token {TokenKind::Greater, ">", loc};
+            return Token {TokenKind::Greater, ">", {loc, location_}};
         case ':':
             advance();
             if (match(':')) {
-                return Token {TokenKind::ColonColon, "::", loc};
+                return Token {TokenKind::ColonColon, "::", {loc, location_}};
             }
-            return Token {TokenKind::Colon, ":", loc};
+            return Token {TokenKind::Colon, ":", {loc, location_}};
         case '.':
             advance();
             if (match('.')) {
                 if (match('.')) {
-                    return Token {TokenKind::VarArg, "...", loc};
+                    return Token {TokenKind::VarArg, "...", {loc, location_}};
                 }
-                return Token {TokenKind::DotDot, "..", loc};
+                return Token {TokenKind::DotDot, "..", {loc, location_}};
             }
-            return Token {TokenKind::Dot, ".", loc};
+            return Token {TokenKind::Dot, ".", {loc, location_}};
         default:
             advance();
-            return Token {TokenKind::Unknown, std::string(1, ch), loc};
+            return Token {TokenKind::Unknown, std::string(1, ch), {loc, location_}};
     }
 }
 
@@ -198,9 +198,9 @@ private:
     std::string text(source_.substr(start, index_ - start));
     const auto it = keywords().find(text);
     if (it != keywords().end()) {
-        return Token {it->second, std::move(text), loc};
+        return Token {it->second, std::move(text), {loc, location_}};
     }
-    return Token {TokenKind::Identifier, std::move(text), loc};
+    return Token {TokenKind::Identifier, std::move(text), {loc, location_}};
 }
 
     Token scan_number(SourceLocation loc) {
@@ -230,7 +230,7 @@ private:
             location_ = save_location;
         }
     }
-    return Token {TokenKind::Numeral, std::string(source_.substr(start, index_ - start)), loc};
+    return Token {TokenKind::Numeral, std::string(source_.substr(start, index_ - start)), {loc, location_}};
 }
 
     Token scan_string(SourceLocation loc, char quote) {
@@ -239,7 +239,7 @@ private:
     while (!at_end()) {
         const char ch = advance();
         if (ch == quote) {
-            return Token {TokenKind::String, std::move(value), loc};
+            return Token {TokenKind::String, std::move(value), {loc, location_}};
         }
         if (ch == '\\' && !at_end()) {
             value.push_back(advance());
@@ -247,7 +247,7 @@ private:
             value.push_back(ch);
         }
     }
-    return Token {TokenKind::Unknown, std::move(value), loc};
+    return Token {TokenKind::UnterminatedString, std::move(value), {loc, location_}};
 }
 
     std::string_view source_;
@@ -265,7 +265,7 @@ SourceLocation end_location(const std::vector<Token>& tokens) {
     if (tokens.empty()) {
         return SourceLocation {};
     }
-    return tokens.back().location;
+    return tokens.back().range.end;
 }
 
 } // namespace suru::front

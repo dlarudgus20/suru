@@ -1,20 +1,17 @@
 #pragma once
 
-#include <cstddef>
 #include <string>
 
-namespace suru::front {
+#include "suru/front/location.hpp"
 
-struct SourceLocation {
-    std::size_t line {1};
-    std::size_t column {1};
-};
+namespace suru::front {
 
 enum class TokenKind {
     EndOfFile,
     Identifier,
     Numeral,
     String,
+    UnterminatedString,
     VarArg,
     KwAnd,
     KwBreak,
@@ -77,7 +74,7 @@ enum class TokenKind {
 struct Token {
     TokenKind kind {TokenKind::Unknown};
     std::string lexeme;
-    SourceLocation location;
+    SourceRange range;
 };
 
 } // namespace suru::front

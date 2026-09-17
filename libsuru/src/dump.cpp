@@ -27,7 +27,9 @@ void indent(std::ostringstream& out, std::size_t depth) { out << std::string(dep
 void header(std::ostringstream& out, std::size_t depth, std::string_view kind, NodeId id, SourceRange range) {
     indent(out, depth); out << "kind: " << yaml_quote(kind) << '\n';
     indent(out, depth); out << "id: " << id << '\n';
-    indent(out, depth); out << "loc: { line: " << range.begin.line << ", column: " << range.begin.column << " }\n";
+    indent(out, depth); out << "range:\n";
+    indent(out, depth + 1); out << "begin: { line: " << range.begin.line << ", column: " << range.begin.column << " }\n";
+    indent(out, depth + 1); out << "end: { line: " << range.end.line << ", column: " << range.end.column << " }\n";
 }
 
 void field(std::ostringstream& out, std::size_t depth, std::string_view key, std::string_view value) {

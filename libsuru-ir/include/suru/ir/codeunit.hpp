@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <variant>
 #include <vector>
@@ -8,6 +9,9 @@
 #include "suru/ir/instruction.hpp"
 
 namespace suru::ir {
+
+using UpvalueCount = std::uint8_t;
+inline constexpr UpvalueCount max_upvalue_count = std::numeric_limits<UpvalueCount>::max();
 
 struct NumberConstant {
     double value {0.0};

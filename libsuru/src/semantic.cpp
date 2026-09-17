@@ -20,6 +20,14 @@ struct CaptureSource {
     std::uint8_t index {0};
 };
 
+struct LoopContext {
+    NodeId statement {0};
+    std::optional<std::string> label;
+    std::uint8_t close_base {0};
+    bool repeat {false};
+    std::size_t body_scope_depth {0};
+};
+
 struct FunctionContext {
     FunctionContext* parent {nullptr};
     NodeId body {0};
@@ -27,6 +35,9 @@ struct FunctionContext {
     std::uint16_t next_slot {0};
     std::vector<std::unordered_map<std::string, std::uint8_t>> scopes;
     std::vector<suru::ir::UpvalueInfo> upvalues;
+    bool upvalue_overflow {false};
+    std::vector<LoopContext> loops;
+    std::vector<std::uint8_t> block_bases;
 
     std::optional<std::uint8_t> local(std::string_view name) const {
         for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
@@ -41,6 +52,10 @@ struct FunctionContext {
                 return static_cast<std::uint8_t>(i);
             }
         }
+        if (upvalues.size() >= suru::ir::max_upvalue_count) {
+            upvalue_overflow = true;
+            return 0;
+        }
         upvalues.push_back({source.source, source.index});
         return static_cast<std::uint8_t>(upvalues.size() - 1U);
     }
@@ -52,14 +67,6 @@ struct FunctionContext {
         if (source.global) return source;
         return {false, suru::ir::UpvalueSource::Upvalue, ensure_upvalue(source)};
     }
-};
-
-struct LoopContext {
-    NodeId statement {0};
-    std::optional<std::string> label;
-    std::uint8_t close_base {0};
-    bool repeat {false};
-    std::size_t body_scope_depth {0};
 };
 
 class Resolver {
@@ -99,23 +106,23 @@ private:
     void resolve_block(const Block& block) {
         const auto base = checked_slots(function_->next_slot, block.range.begin);
         model_.block_bases[block.id] = base;
-        block_bases_.push_back(base);
+        function_->block_bases.push_back(base);
         function_->scopes.emplace_back();
         for (const auto& stmt : block.statements) resolve_stmt(*stmt);
         function_->scopes.pop_back();
-        block_bases_.pop_back();
+        function_->block_bases.pop_back();
     }
 
     void resolve_loop_block(const Block& block, NodeId declaration, const std::vector<std::string>& names) {
         model_.block_bases[block.id] = checked_slots(function_->next_slot, block.range.begin);
-        block_bases_.push_back(model_.block_bases[block.id]);
+        function_->block_bases.push_back(model_.block_bases[block.id]);
         function_->scopes.emplace_back();
         std::vector<std::uint8_t> slots;
         for (const auto& name : names) slots.push_back(allocate(name, block.range.begin));
         model_.declarations[declaration] = std::move(slots);
         for (const auto& stmt : block.statements) resolve_stmt(*stmt);
         function_->scopes.pop_back();
-        block_bases_.pop_back();
+        function_->block_bases.pop_back();
     }
 
     void resolve_repeat_block(const RepeatStmt& node, NodeId statement_id) {
@@ -123,13 +130,13 @@ private:
         const std::uint8_t close_base = checked_slots(function_->next_slot, block.range.begin);
         model_.block_bases[block.id] = close_base;
         function_->scopes.emplace_back();
-        block_bases_.push_back(close_base);
-        loops_.push_back({statement_id, node.label, close_base, true, block_bases_.size()});
+        function_->block_bases.push_back(close_base);
+        function_->loops.push_back({statement_id, node.label, close_base, true, function_->block_bases.size()});
         for (const auto& stmt : block.statements) resolve_stmt(*stmt);
         resolve_expr(*node.condition);
         function_->scopes.pop_back();
-        loops_.pop_back();
-        block_bases_.pop_back();
+        function_->loops.pop_back();
+        function_->block_bases.pop_back();
     }
 
     void resolve_function(const FunctionBody& body, bool implicit_self) {
@@ -147,7 +154,7 @@ private:
         for (const auto& parameter : body.parameters) allocate(parameter, body.range.begin);
         resolve_block(*body.block);
 
-        if (child.upvalues.size() > 255) {
+        if (child.upvalue_overflow) {
             diagnostic(body.range.begin, "function captures more than 255 upvalues");
         }
 
@@ -196,13 +203,13 @@ private:
     }
 
     void resolve_jump(const Stmt& stmt, const std::optional<std::string>& label, bool is_continue) {
-        for (auto it = loops_.rbegin(); it != loops_.rend(); ++it) {
+        for (auto it = function_->loops.rbegin(); it != function_->loops.rend(); ++it) {
             if (!label || it->label == label) {
                 std::optional<std::uint8_t> close = it->close_base;
                 if (is_continue && it->repeat) {
                     close.reset();
-                    if (block_bases_.size() > it->body_scope_depth) {
-                        close = block_bases_[it->body_scope_depth];
+                    if (function_->block_bases.size() > it->body_scope_depth) {
+                        close = function_->block_bases[it->body_scope_depth];
                     }
                 }
                 model_.loop_targets[stmt.id] = {it->statement, close};
@@ -221,7 +228,7 @@ private:
             else if constexpr (std::is_same_v<T, WhileStmt>) {
                 resolve_expr(*node.condition);
                 const auto base = checked_slots(function_->next_slot, node.block->range.begin);
-                loops_.push_back({stmt.id, node.label, base, false, 0}); resolve_block(*node.block); loops_.pop_back();
+                function_->loops.push_back({stmt.id, node.label, base, false, 0}); resolve_block(*node.block); function_->loops.pop_back();
             } else if constexpr (std::is_same_v<T, RepeatStmt>) resolve_repeat_block(node, stmt.id);
             else if constexpr (std::is_same_v<T, IfStmt>) {
                 for (const auto& branch : node.branches) { resolve_expr(*branch.condition); resolve_block(*branch.block); }
@@ -235,13 +242,13 @@ private:
                     }
                 }
                 const auto base = checked_slots(function_->next_slot, node.block->range.begin);
-                loops_.push_back({stmt.id, node.label, base, false, 0});
-                resolve_loop_block(*node.block, stmt.id, {node.name}); loops_.pop_back();
+                function_->loops.push_back({stmt.id, node.label, base, false, 0});
+                resolve_loop_block(*node.block, stmt.id, {node.name}); function_->loops.pop_back();
             } else if constexpr (std::is_same_v<T, GenericForStmt>) {
                 for (const auto& expr : node.expressions) resolve_expr(*expr);
                 const auto base = checked_slots(function_->next_slot, node.block->range.begin);
-                loops_.push_back({stmt.id, node.label, base, false, 0});
-                resolve_loop_block(*node.block, stmt.id, node.names); loops_.pop_back();
+                function_->loops.push_back({stmt.id, node.label, base, false, 0});
+                resolve_loop_block(*node.block, stmt.id, node.names); function_->loops.pop_back();
             } else if constexpr (std::is_same_v<T, FunctionStmt>) {
                 model_.function_roots[stmt.id] = resolve_name(node.name.path.front());
                 resolve_function(*node.body, node.name.method.has_value());
@@ -265,8 +272,6 @@ private:
     SemanticModel model_;
     std::vector<Diagnostic> diagnostics_;
     FunctionContext* function_ {nullptr};
-    std::vector<LoopContext> loops_;
-    std::vector<std::uint8_t> block_bases_;
 };
 
 } // namespace

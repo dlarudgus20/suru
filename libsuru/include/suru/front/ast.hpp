@@ -13,11 +13,6 @@ namespace suru::front {
 
 using NodeId = std::uint32_t;
 
-struct SourceRange {
-    SourceLocation begin;
-    SourceLocation end;
-};
-
 struct Expr;
 struct Stmt;
 struct Block;

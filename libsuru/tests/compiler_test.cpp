@@ -1,6 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <string_view>
+#include <string>
+#include <sstream>
+#include "suru/front/semantic.hpp"
+#include "suru/ir/assembler.hpp"
+#include "suru/ir/disassembler.hpp"
+#include "suru/ir/image.hpp"
 
 #include "suru/front/compile.hpp"
 #include "suru/front/parse.hpp"
@@ -176,6 +182,110 @@ result = 1
 )")),
         suru::vm::RaisedError
     );
+}
+
+
+TEST(Compiler, UsesParentPrototypeNamesAndRoundTripsClosures) {
+    auto parsed = suru::front::parse(R"(
+local fn outer()
+    local fn first() end
+    local fn second()
+        local fn inner() end
+    end
+end
+local fn outer() end
+do local fn outer() end end
+local a = fn() return fn() end end
+local b = fn() end
+)");
+    ASSERT_TRUE(parsed.ok());
+    auto compiled = suru::front::compile(parsed.tree);
+    ASSERT_TRUE(compiled.ok());
+    const std::vector<std::string> names {
+        "<main>", "outer@0", "outer@0::first@0", "outer@0::second@1",
+        "outer@0::second@1::inner@0", "outer@1", "outer@2",
+        "lambda@3", "lambda@3::lambda@0", "lambda@4"
+    };
+    ASSERT_EQ(compiled.code.chunks.size(), names.size());
+    std::ostringstream assembly;
+    suru::ir::disassemble(assembly, compiled.code);
+    const auto roundtrip = suru::ir::assemble(assembly.str());
+    EXPECT_EQ(roundtrip.entry_chunk, compiled.code.entry_chunk);
+    ASSERT_EQ(roundtrip.chunks.size(), names.size());
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        EXPECT_EQ(compiled.code.chunks[i].name, names[i]);
+        EXPECT_EQ(roundtrip.chunks[i].name, names[i]);
+        EXPECT_EQ(roundtrip.chunks[i].code, compiled.code.chunks[i].code);
+    }
+}
+
+TEST(Compiler, RejectsLoopControlAcrossFunctionBoundaries) {
+    for (const std::string jump : {"break", "continue", "break outer", "continue outer"}) {
+        for (const bool deep : {false, true}) {
+            const std::string source = "outer: while true do local fn f() "
+                + std::string(deep ? "local fn g() " : "") + jump
+                + (deep ? " end" : "") + " end end";
+            auto parsed = suru::front::parse(source);
+            ASSERT_TRUE(parsed.ok()) << source;
+            auto resolved = suru::front::resolve(parsed.tree);
+            ASSERT_FALSE(resolved.ok()) << source;
+            ASSERT_FALSE(resolved.diagnostics.empty());
+            EXPECT_EQ(resolved.diagnostics.front().message,
+                jump.find(' ') == std::string::npos
+                    ? "loop control outside loop" : "unknown loop label: outer");
+        }
+    }
+}
+
+TEST(Compiler, NestedFunctionOwnsLoopsAndCloseBoundaries) {
+    const auto value = execute(R"(
+local saved
+outer: for i = 0, 1 do
+    local fn f()
+        local j = 0
+        inner: repeat
+            local x = j
+            saved = fn() return x end
+            j = j + 1
+            if j < 2 then continue inner end
+            break inner
+        until false
+        return saved()
+    end
+    result = f()
+    break outer
+end
+)");
+    ASSERT_EQ(value.kind, suru::vm::ValueKind::Number);
+    EXPECT_EQ(value.number_, 1);
+}
+
+TEST(Compiler, BoundsUpvaluesBeforeIndexNarrowing) {
+    for (const std::size_t count : {255U, 256U}) {
+        // Spread captured locals over parents so the local-register limit does
+        // not mask the upvalue boundary in the innermost function.
+        std::string source = "local a = 1 local fn parent() ";
+        for (std::size_t i = 1; i < count; ++i) source += "local x" + std::to_string(i) + " = 1 ";
+        source += "return fn() sink(a) ";
+        for (std::size_t i = 1; i < count; ++i) source += "sink(x" + std::to_string(i) + ") ";
+        source += "end end";
+        auto parsed = suru::front::parse(source);
+        ASSERT_TRUE(parsed.ok());
+        auto resolved = suru::front::resolve(parsed.tree);
+        if (count == 255) {
+            ASSERT_TRUE(resolved.ok());
+            auto compiled = suru::front::compile(parsed.tree, resolved.model);
+            ASSERT_TRUE(compiled.ok());
+            EXPECT_EQ(compiled.code.chunks.back().upvalue_infos.size(), 255U);
+        } else {
+            ASSERT_FALSE(resolved.ok());
+            bool found = false;
+            for (const auto& diagnostic : resolved.diagnostics) {
+                if (diagnostic.message == "function captures more than 255 upvalues") found = true;
+            }
+            EXPECT_TRUE(found);
+        }
+    }
 }
 
 } // namespace

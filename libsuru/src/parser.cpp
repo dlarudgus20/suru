@@ -16,7 +16,7 @@ public:
     ParseResult run() {
         if (tokens_.empty()) tokens_.push_back(Token {TokenKind::EndOfFile, "", {}});
         else if (tokens_.back().kind != TokenKind::EndOfFile) {
-            tokens_.push_back(Token {TokenKind::EndOfFile, "", tokens_.back().location});
+            tokens_.push_back(Token {TokenKind::EndOfFile, "", {tokens_.back().range.end, tokens_.back().range.end}});
         }
 
         ParseResult result;
@@ -29,7 +29,11 @@ public:
 
 private:
     NodeId next_id() { return next_id_++; }
-    SourceRange range(SourceLocation location) const { return SourceRange {location, location}; }
+    SourceRange range(SourceLocation location) const {
+        SourceLocation end = index_ == 0 ? location : previous().range.end;
+        if (end.line < location.line || (end.line == location.line && end.column < location.column)) end = location;
+        return {location, end};
+    }
 
     template <typename T>
     ExprPtr expression(SourceLocation location, T kind) {
@@ -48,8 +52,8 @@ private:
     }
 
     Block parse_block() {
-        const SourceLocation location = current().location;
-        Block block {next_id(), range(location), {}};
+        const SourceLocation location = current().range.begin;
+        Block block {next_id(), {location, location}, {}};
         while (!at_end() && !is_terminator(current().kind)) {
             if (match(TokenKind::Semicolon)) continue;
             if (current().kind == TokenKind::KwReturn) {
@@ -61,6 +65,8 @@ private:
             if (failed_) break;
             while (match(TokenKind::Semicolon)) {}
         }
+        if (block.statements.empty()) block.range = {current().range.begin, current().range.begin};
+        else block.range = {block.statements.front()->range.begin, block.statements.back()->range.end};
         return block;
     }
 
@@ -83,11 +89,15 @@ private:
                     && (peek(2).kind == TokenKind::KwWhile
                         || peek(2).kind == TokenKind::KwRepeat
                         || peek(2).kind == TokenKind::KwFor)) {
+                    const SourceLocation begin = current().range.begin;
                     std::string label = advance().lexeme;
                     advance();
-                    if (current().kind == TokenKind::KwWhile) return parse_while_statement(std::move(label));
-                    if (current().kind == TokenKind::KwRepeat) return parse_repeat_statement(std::move(label));
-                    return parse_for_statement(std::move(label));
+                    StmtPtr loop;
+                    if (current().kind == TokenKind::KwWhile) loop = parse_while_statement(std::move(label));
+                    else if (current().kind == TokenKind::KwRepeat) loop = parse_repeat_statement(std::move(label));
+                    else loop = parse_for_statement(std::move(label));
+                    loop->range.begin = begin;
+                    return loop;
                 }
                 return parse_assignment_or_call_statement();
         }
@@ -97,21 +107,21 @@ private:
         const Token keyword = advance();
         std::optional<std::string> label;
         if (current().kind == TokenKind::Identifier) label = advance().lexeme;
-        return statement(keyword.location, BreakStmt {std::move(label)});
+        return statement(keyword.range.begin, BreakStmt {std::move(label)});
     }
 
     StmtPtr parse_continue_statement() {
         const Token keyword = advance();
         std::optional<std::string> label;
         if (current().kind == TokenKind::Identifier) label = advance().lexeme;
-        return statement(keyword.location, ContinueStmt {std::move(label)});
+        return statement(keyword.range.begin, ContinueStmt {std::move(label)});
     }
 
     StmtPtr parse_do_statement() {
         const Token keyword = advance();
         BlockPtr block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return statement(keyword.location, DoStmt {std::move(block)});
+        return statement(keyword.range.begin, DoStmt {std::move(block)});
     }
 
     StmtPtr parse_while_statement(std::optional<std::string> label) {
@@ -120,7 +130,7 @@ private:
         consume(TokenKind::KwDo, "expected 'do'");
         BlockPtr block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return statement(keyword.location, WhileStmt {std::move(label), std::move(condition), std::move(block)});
+        return statement(keyword.range.begin, WhileStmt {std::move(label), std::move(condition), std::move(block)});
     }
 
     StmtPtr parse_repeat_statement(std::optional<std::string> label) {
@@ -128,23 +138,24 @@ private:
         BlockPtr block = block_ptr();
         consume(TokenKind::KwUntil, "expected 'until'");
         ExprPtr condition = parse_expression();
-        return statement(keyword.location, RepeatStmt {std::move(label), std::move(block), std::move(condition)});
+        return statement(keyword.range.begin, RepeatStmt {std::move(label), std::move(block), std::move(condition)});
     }
 
     StmtPtr parse_if_statement() {
         const Token keyword = consume(TokenKind::KwIf, "expected 'if'");
         std::vector<IfBranch> branches;
         do {
-            const SourceLocation location = current().location;
+            const SourceLocation location = previous().range.begin;
             ExprPtr condition = parse_expression();
             consume(TokenKind::KwThen, "expected 'then'");
-            branches.push_back(IfBranch {next_id(), range(location), std::move(condition), block_ptr()});
+            BlockPtr block = block_ptr();
+            branches.push_back(IfBranch {next_id(), range(location), std::move(condition), std::move(block)});
         } while (match(TokenKind::KwElseIf));
 
         BlockPtr else_block;
         if (match(TokenKind::KwElse)) else_block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return statement(keyword.location, IfStmt {std::move(branches), std::move(else_block)});
+        return statement(keyword.range.begin, IfStmt {std::move(branches), std::move(else_block)});
     }
 
     StmtPtr parse_for_statement(std::optional<std::string> label) {
@@ -159,7 +170,7 @@ private:
             consume(TokenKind::KwDo, "expected 'do'");
             BlockPtr block = block_ptr();
             consume(TokenKind::KwEnd, "expected 'end'");
-            return statement(keyword.location, NumericForStmt {
+            return statement(keyword.range.begin, NumericForStmt {
                 std::move(label), first.lexeme, std::move(initial), std::move(limit),
                 std::move(step), std::move(block)
             });
@@ -172,7 +183,7 @@ private:
         consume(TokenKind::KwDo, "expected 'do'");
         BlockPtr block = block_ptr();
         consume(TokenKind::KwEnd, "expected 'end'");
-        return statement(keyword.location, GenericForStmt {
+        return statement(keyword.range.begin, GenericForStmt {
             std::move(label), std::move(names), std::move(expressions), std::move(block)
         });
     }
@@ -186,7 +197,7 @@ private:
     }
 
     FunctionBodyPtr parse_function_body() {
-        const SourceLocation location = current().location;
+        const SourceLocation location = current().range.begin;
         consume(TokenKind::LParen, "expected '('");
         std::vector<std::string> parameters;
         bool vararg = false;
@@ -213,21 +224,21 @@ private:
         const Token keyword = advance();
         FunctionName name = parse_function_name();
         FunctionBodyPtr body = parse_function_body();
-        return statement(keyword.location, FunctionStmt {std::move(name), std::move(body)});
+        return statement(keyword.range.begin, FunctionStmt {std::move(name), std::move(body)});
     }
 
     StmtPtr parse_local_statement() {
         const Token keyword = advance();
         if (match(TokenKind::KwFunction)) {
             const Token name = consume(TokenKind::Identifier, "expected function name");
-            return statement(keyword.location, LocalFunctionStmt {name.lexeme, parse_function_body()});
+            return statement(keyword.range.begin, LocalFunctionStmt {name.lexeme, parse_function_body()});
         }
         std::vector<std::string> names;
         names.push_back(consume(TokenKind::Identifier, "expected local name").lexeme);
         while (match(TokenKind::Comma)) names.push_back(consume(TokenKind::Identifier, "expected local name").lexeme);
         std::vector<ExprPtr> expressions;
         if (match(TokenKind::Assign)) expressions = parse_expression_list();
-        return statement(keyword.location, LocalDeclStmt {std::move(names), std::move(expressions)});
+        return statement(keyword.range.begin, LocalDeclStmt {std::move(names), std::move(expressions)});
     }
 
     StmtPtr parse_return_statement() {
@@ -236,12 +247,12 @@ private:
         if (current().kind != TokenKind::Semicolon && !is_terminator(current().kind) && !at_end()) {
             expressions = parse_expression_list();
         }
-        return statement(keyword.location, ReturnStmt {std::move(expressions)});
+        return statement(keyword.range.begin, ReturnStmt {std::move(expressions)});
     }
 
     StmtPtr parse_assignment_or_call_statement() {
         ExprPtr left = parse_prefix_expression();
-        if (failed_) return statement(current().location, CallStmt {std::move(left)});
+        if (failed_) return statement(current().range.begin, CallStmt {std::move(left)});
         if (is_call(*left) && current().kind != TokenKind::Assign && current().kind != TokenKind::Comma) {
             const SourceLocation location = left->range.begin;
             return statement(location, CallStmt {std::move(left)});
@@ -277,28 +288,40 @@ private:
         ExprPtr left;
         if (is_unary(current().kind)) {
             const Token op = advance();
-            left = expression(op.location, UnaryExpr {op.lexeme, parse_subexpression(11)});
+            left = expression(op.range.begin, UnaryExpr {op.lexeme, parse_subexpression(11)});
         } else left = parse_simple_expression();
         while (!failed_) {
             int lhs_priority = 0;
             int rhs_priority = 0;
             if (!binary_priority(current().kind, lhs_priority, rhs_priority) || lhs_priority <= min_priority) break;
             const Token op = advance();
-            left = expression(op.location, BinaryExpr {op.lexeme, std::move(left), parse_subexpression(rhs_priority)});
+            const SourceLocation begin = left->range.begin;
+            left = expression(begin, BinaryExpr {op.lexeme, std::move(left), parse_subexpression(rhs_priority)});
         }
         return left;
+    }
+
+    ExprPtr unterminated_string() {
+        const Token token = advance();
+        if (!failed_) {
+            diagnostics_.push_back({token.range.begin, "unterminated string"});
+            status_ = ParseStatus::Incomplete;
+            failed_ = true;
+        }
+        return expression(token.range.begin, StringExpr {token.lexeme});
     }
 
     ExprPtr parse_simple_expression() {
         const Token token = current();
         switch (token.kind) {
-            case TokenKind::KwNil: advance(); return expression(token.location, NilExpr {});
-            case TokenKind::KwFalse: advance(); return expression(token.location, BoolExpr {false});
-            case TokenKind::KwTrue: advance(); return expression(token.location, BoolExpr {true});
-            case TokenKind::Numeral: advance(); return expression(token.location, NumberExpr {token.lexeme});
-            case TokenKind::String: advance(); return expression(token.location, StringExpr {token.lexeme});
-            case TokenKind::VarArg: advance(); return expression(token.location, VarargExpr {});
-            case TokenKind::KwFunction: advance(); return expression(token.location, FunctionExpr {parse_function_body()});
+            case TokenKind::KwNil: advance(); return expression(token.range.begin, NilExpr {});
+            case TokenKind::KwFalse: advance(); return expression(token.range.begin, BoolExpr {false});
+            case TokenKind::KwTrue: advance(); return expression(token.range.begin, BoolExpr {true});
+            case TokenKind::Numeral: advance(); return expression(token.range.begin, NumberExpr {token.lexeme});
+            case TokenKind::String: advance(); return expression(token.range.begin, StringExpr {token.lexeme});
+            case TokenKind::UnterminatedString: return unterminated_string();
+            case TokenKind::VarArg: advance(); return expression(token.range.begin, VarargExpr {});
+            case TokenKind::KwFunction: advance(); return expression(token.range.begin, FunctionExpr {parse_function_body()});
             case TokenKind::LBrace: return parse_table_constructor();
             case TokenKind::LBracket: return parse_array_constructor();
             default: return parse_prefix_expression();
@@ -313,33 +336,35 @@ private:
             match(TokenKind::Comma);
         }
         consume(TokenKind::RBracket, "expected ']'");
-        return expression(open.location, ArrayExpr {std::move(elements)});
+        return expression(open.range.begin, ArrayExpr {std::move(elements)});
     }
 
     ExprPtr literal_table_key() {
+        if (current().kind == TokenKind::UnterminatedString) return unterminated_string();
         const Token token = advance();
         switch (token.kind) {
             case TokenKind::Identifier: case TokenKind::String:
-                return expression(token.location, StringExpr {token.lexeme});
-            case TokenKind::Numeral: return expression(token.location, NumberExpr {token.lexeme});
-            case TokenKind::KwTrue: return expression(token.location, BoolExpr {true});
-            case TokenKind::KwFalse: return expression(token.location, BoolExpr {false});
+                return expression(token.range.begin, StringExpr {token.lexeme});
+            case TokenKind::Numeral: return expression(token.range.begin, NumberExpr {token.lexeme});
+            case TokenKind::KwTrue: return expression(token.range.begin, BoolExpr {true});
+            case TokenKind::KwFalse: return expression(token.range.begin, BoolExpr {false});
             default: break;
         }
-        error_at(token.location, "expected table key");
-        return expression(token.location, NilExpr {});
+        error_at(token.range.begin, "expected table key");
+        return expression(token.range.begin, NilExpr {});
     }
 
     ExprPtr parse_table_constructor() {
         const Token open = advance();
         std::vector<TableField> fields;
         while (!failed_ && current().kind != TokenKind::RBrace) {
-            const SourceLocation location = current().location;
+            const SourceLocation location = current().range.begin;
             ExprPtr key;
             if (match(TokenKind::LParen)) {
                 key = parse_expression();
                 consume(TokenKind::RParen, "expected ')'");
             } else if (current().kind == TokenKind::Identifier || current().kind == TokenKind::String
+                || current().kind == TokenKind::UnterminatedString
                 || current().kind == TokenKind::Numeral || current().kind == TokenKind::KwTrue
                 || current().kind == TokenKind::KwFalse) {
                 key = literal_table_key();
@@ -348,42 +373,43 @@ private:
                 break;
             }
             consume(TokenKind::Assign, "expected '='");
-            fields.push_back(TableField {next_id(), range(location), std::move(key), parse_expression()});
+            ExprPtr value = parse_expression();
+            fields.push_back(TableField {next_id(), range(location), std::move(key), std::move(value)});
             if (!match(TokenKind::Comma) && !match(TokenKind::Semicolon)) break;
         }
         consume(TokenKind::RBrace, "expected '}'");
-        return expression(open.location, TableExpr {std::move(fields)});
+        return expression(open.range.begin, TableExpr {std::move(fields)});
     }
 
     ExprPtr parse_prefix_expression() {
         ExprPtr result;
         if (match(TokenKind::Identifier)) {
             const Token name = previous();
-            result = expression(name.location, NameExpr {name.lexeme});
+            result = expression(name.range.begin, NameExpr {name.lexeme});
         } else if (match(TokenKind::LParen)) {
             const Token open = previous();
-            result = expression(open.location, GroupExpr {parse_expression()});
+            ExprPtr inner = parse_expression();
             consume(TokenKind::RParen, "expected ')'");
+            result = expression(open.range.begin, GroupExpr {std::move(inner)});
         } else {
-            const SourceLocation location = current().location;
+            const SourceLocation location = current().range.begin;
             error_here("expected expression");
             return expression(location, NilExpr {});
         }
         while (!failed_) {
+            const SourceLocation begin = result->range.begin;
             if (match(TokenKind::LBracket)) {
-                const Token open = previous();
                 ExprPtr key = parse_expression();
                 consume(TokenKind::RBracket, "expected ']'");
-                result = expression(open.location, IndexExpr {std::move(result), std::move(key)});
+                result = expression(begin, IndexExpr {std::move(result), std::move(key)});
             } else if (match(TokenKind::Dot)) {
                 const Token name = consume(TokenKind::Identifier, "expected field name");
-                result = expression(name.location, FieldExpr {std::move(result), name.lexeme});
+                result = expression(begin, FieldExpr {std::move(result), name.lexeme});
             } else if (match(TokenKind::Colon)) {
                 const Token method = consume(TokenKind::Identifier, "expected method name");
-                result = expression(method.location, MethodCallExpr {std::move(result), method.lexeme, parse_arguments()});
+                result = expression(begin, MethodCallExpr {std::move(result), method.lexeme, parse_arguments()});
             } else if (starts_arguments(current().kind)) {
-                const SourceLocation location = current().location;
-                result = expression(location, CallExpr {std::move(result), parse_arguments()});
+                result = expression(begin, CallExpr {std::move(result), parse_arguments()});
             } else break;
         }
         return result;
@@ -395,13 +421,16 @@ private:
             if (current().kind != TokenKind::RParen) arguments = parse_expression_list();
             consume(TokenKind::RParen, "expected ')'");
         } else if (current().kind == TokenKind::LBrace) arguments.push_back(parse_table_constructor());
-        else if (current().kind == TokenKind::String) arguments.push_back(parse_simple_expression());
+        else if (current().kind == TokenKind::String || current().kind == TokenKind::UnterminatedString) {
+            arguments.push_back(parse_simple_expression());
+        }
         else error_here("expected function arguments");
         return arguments;
     }
 
     static bool starts_arguments(TokenKind kind) {
-        return kind == TokenKind::LParen || kind == TokenKind::LBrace || kind == TokenKind::String;
+        return kind == TokenKind::LParen || kind == TokenKind::LBrace
+            || kind == TokenKind::String || kind == TokenKind::UnterminatedString;
     }
     static bool is_variable(const Expr& expr) {
         return std::holds_alternative<NameExpr>(expr.kind) || std::holds_alternative<IndexExpr>(expr.kind)
@@ -443,16 +472,16 @@ private:
         const std::size_t position = index_ + offset;
         return position < tokens_.size() ? tokens_[position] : tokens_.back();
     }
-    Token advance() { if (!at_end()) ++index_; return tokens_[index_ - 1]; }
+    Token advance() { const Token token = current(); if (!at_end()) ++index_; return token; }
     bool match(TokenKind kind) { if (current().kind != kind) return false; advance(); return true; }
     Token consume(TokenKind kind, const std::string& message) {
         if (current().kind == kind) return advance();
         if (at_end()) incomplete_here(); else error_here(message);
-        return Token {kind, "", current().location};
+        return Token {kind, "", current().range};
     }
-    void error_here(const std::string& message) { if (at_end()) incomplete_here(); else error_at(current().location, message); }
+    void error_here(const std::string& message) { if (at_end()) incomplete_here(); else error_at(current().range.begin, message); }
     void incomplete_here() {
-        if (!failed_) diagnostics_.push_back({current().location, "unexpected end of file"});
+        if (!failed_) diagnostics_.push_back({current().range.begin, "unexpected end of file"});
         status_ = ParseStatus::Incomplete;
         failed_ = true;
     }

@@ -1,3 +1,5 @@
+#include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -6,10 +8,12 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "suru/front/compile.hpp"
 #include "suru/front/dump.hpp"
 #include "suru/front/parse.hpp"
+#include "suru/ir/assembler.hpp"
 #include "suru/ir/disassembler.hpp"
 #include "suru/ir/image.hpp"
 #include "suru/lib/lib.hpp"
@@ -19,10 +23,13 @@
 
 namespace {
 
-enum class Mode { Execute, Ast, Ir };
+enum class Mode { Execute, Ast, Ir, Sbc, Disas };
+enum class InputFormat { Source, Ir, Sbc };
 
 struct Options {
     Mode mode {Mode::Execute};
+    InputFormat format {InputFormat::Source};
+    std::optional<InputFormat> explicit_format;
     std::optional<std::string> input;
     std::optional<std::filesystem::path> output;
 };
@@ -34,10 +41,24 @@ public:
 
 void help(std::ostream& out) {
     out << "Usage:\n"
-        << "  suru [file.suru|file.sbc|-]\n"
-        << "  suru --ast [file.suru|-] [-o output.yaml]\n"
-        << "  suru --ir  [file.suru|-] [-o output.sbc]\n"
-        << "\nWithout a file, the selected mode starts a REPL.\n";
+        << "  suru [--in=src|ir|sbc] [input|-]\n"
+        << "  suru --ast [--in=src] [input|-] [-o output.yaml]\n"
+        << "  suru --ir [--in=src|ir] [input|-] [-o output.sura]\n"
+        << "  suru --sbc [--in=src|ir] input|- -o output.sbc\n"
+        << "  suru --disas [--in=sbc] input [-o output.sura]\n"
+        << "\nWithout --in, .sura selects IR, .sbc selects SBC, otherwise source.\n"
+        << "Extensions are case-insensitive; explicit --in overrides them.\n"
+        << "Without input, source execute/--ast/--ir starts a REPL.\n"
+        << "SBC stdin and binary stdout are not supported.\n";
+}
+
+InputFormat inferred_format(const std::optional<std::string>& input) {
+    if (!input || *input == "-") return InputFormat::Source;
+    std::string extension = std::filesystem::path(*input).extension().string();
+    for (char& ch : extension) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if (extension == ".sura") return InputFormat::Ir;
+    if (extension == ".sbc") return InputFormat::Sbc;
+    return InputFormat::Source;
 }
 
 Options options(int argc, char** argv) {
@@ -45,10 +66,19 @@ Options options(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
         if (arg == "--help" || arg == "-h") { help(std::cout); std::exit(0); }
-        if (arg == "--ast" || arg == "--ir") {
-            const Mode next = arg == "--ast" ? Mode::Ast : Mode::Ir;
-            if (result.mode != Mode::Execute) throw CliError("--ast and --ir are mutually exclusive");
-            result.mode = next;
+        if (arg == "--ast" || arg == "--ir" || arg == "--sbc" || arg == "--disas") {
+            if (result.mode != Mode::Execute) throw CliError("output modes may only be specified once and are mutually exclusive");
+            if (arg == "--ast") result.mode = Mode::Ast;
+            else if (arg == "--ir") result.mode = Mode::Ir;
+            else if (arg == "--sbc") result.mode = Mode::Sbc;
+            else result.mode = Mode::Disas;
+        } else if (arg.starts_with("--in=")) {
+            if (result.explicit_format) throw CliError("--in may only be specified once");
+            const auto value = arg.substr(5);
+            if (value == "src") result.explicit_format = InputFormat::Source;
+            else if (value == "ir") result.explicit_format = InputFormat::Ir;
+            else if (value == "sbc") result.explicit_format = InputFormat::Sbc;
+            else throw CliError("--in requires src, ir, or sbc");
         } else if (arg == "-o") {
             if (++i == argc) throw CliError("-o requires a path");
             if (result.output) throw CliError("-o may only be specified once");
@@ -60,12 +90,25 @@ Options options(int argc, char** argv) {
             result.input = std::string(arg);
         }
     }
-    if (result.mode == Mode::Execute && result.output) throw CliError("-o requires --ast or --ir");
-    if (!result.input && result.output) throw CliError("-o is not supported in REPL mode");
+    result.format = result.explicit_format.value_or(inferred_format(result.input));
+    if (!result.input) {
+        if (result.format != InputFormat::Source || result.mode == Mode::Sbc || result.mode == Mode::Disas) {
+            throw CliError("REPL supports only source execute, --ast, or --ir; this mode requires input");
+        }
+        if (result.output) throw CliError("-o is not supported in REPL mode");
+    }
+    if (result.mode == Mode::Execute && result.output) throw CliError("-o requires an output mode");
+    if (result.mode == Mode::Ast && result.format != InputFormat::Source) throw CliError("--ast requires source input");
+    if ((result.mode == Mode::Ir || result.mode == Mode::Sbc) && result.format == InputFormat::Sbc) {
+        throw CliError("--ir and --sbc require source or IR input; use --disas for SBC");
+    }
+    if (result.mode == Mode::Disas && result.format != InputFormat::Sbc) throw CliError("--disas requires SBC input");
+    if (result.input && *result.input == "-" && result.format == InputFormat::Sbc) throw CliError("SBC stdin is not supported");
+    if (result.mode == Mode::Sbc && !result.output) throw CliError("--sbc requires -o; binary stdout is not supported");
     return result;
 }
 
-std::string read_source(const std::string& input) {
+std::string read_text(const std::string& input) {
     if (input == "-") {
         std::ostringstream text; text << std::cin.rdbuf(); return text.str();
     }
@@ -101,14 +144,14 @@ void write_text(std::string_view value, const std::optional<std::filesystem::pat
     if (!file) throw CliError("failed to write output: " + output->string());
 }
 
-void write_ir(const suru::ir::CodeUnit& code, const std::optional<std::filesystem::path>& output) {
-    if (!output) { suru::ir::write_binary(std::cout, code); return; }
+void write_sbc(const suru::ir::CodeUnit& code, const std::optional<std::filesystem::path>& output) {
+    if (!output) throw CliError("SBC output requires -o");
     std::ofstream file(*output, std::ios::binary);
     if (!file) throw CliError("failed to open output: " + output->string());
     suru::ir::write_binary(file, code);
 }
 
-suru::ir::CodeUnit read_ir(const std::filesystem::path& path) {
+suru::ir::CodeUnit read_sbc(const std::filesystem::path& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) throw CliError("failed to open input: " + path.string());
     return suru::ir::read_binary(file);
@@ -120,23 +163,33 @@ void execute(suru::vm::VM& vm, const suru::ir::CodeUnit& code) {
     vm.call(0, 0);
 }
 
+void write_assembly(const suru::ir::CodeUnit& code, const std::optional<std::filesystem::path>& output) {
+    std::ostringstream text;
+    suru::ir::disassemble(text, code);
+    write_text(text.str(), output);
+}
+
 int file_mode(const Options& option) {
     const std::string& input = *option.input;
-    if (option.mode == Mode::Execute && input != "-" && std::filesystem::path(input).extension() == ".sbc") {
-        suru::vm::VM vm; suru::lib::load_libs(vm); execute(vm, read_ir(input)); return 0;
+    suru::ir::CodeUnit code;
+    if (option.format == InputFormat::Sbc) {
+        code = read_sbc(input);
+    } else {
+        const std::string text = read_text(input);
+        if (option.format == InputFormat::Ir) {
+            code = suru::ir::assemble(text);
+        } else {
+            auto parsed = parse_source(text, input == "-" ? "<stdin>" : input);
+            if (!parsed.ok()) return 1;
+            if (option.mode == Mode::Ast) { write_text(suru::front::dump(parsed.tree), option.output); return 0; }
+            auto compiled = compile_source(parsed.tree, parsed.filename);
+            if (!compiled.ok()) return 1;
+            code = std::move(compiled.code);
+        }
     }
-    if (input != "-" && std::filesystem::path(input).extension() == ".sbc") {
-        throw CliError("--ast and --ir require source input");
-    }
-
-    const std::string source = read_source(input);
-    auto parsed = parse_source(source, input == "-" ? "<stdin>" : input);
-    if (!parsed.ok()) return 1;
-    if (option.mode == Mode::Ast) { write_text(suru::front::dump(parsed.tree), option.output); return 0; }
-    auto compiled = compile_source(parsed.tree, parsed.filename);
-    if (!compiled.ok()) return 1;
-    if (option.mode == Mode::Ir) { write_ir(compiled.code, option.output); return 0; }
-    suru::vm::VM vm; suru::lib::load_libs(vm); execute(vm, compiled.code); return 0;
+    if (option.mode == Mode::Ir || option.mode == Mode::Disas) { write_assembly(code, option.output); return 0; }
+    if (option.mode == Mode::Sbc) { write_sbc(code, option.output); return 0; }
+    suru::vm::VM vm; suru::lib::load_libs(vm); execute(vm, code); return 0;
 }
 
 int repl(Mode mode) {
@@ -171,6 +224,8 @@ int main(int argc, char** argv) {
         return option.input ? file_mode(option) : repl(option.mode);
     } catch (const CliError& error) {
         std::cerr << "error: " << error.what() << '\n'; help(std::cerr); return 2;
+    } catch (const suru::ir::AssemblerError& error) {
+        std::cerr << "assembly error at line " << error.line() << ": " << error.what() << '\n'; return 1;
     } catch (const suru::ir::ImageError& error) {
         std::cerr << "IR error: " << error.what() << '\n'; return 1;
     } catch (const suru::vm::RuntimeError& error) {

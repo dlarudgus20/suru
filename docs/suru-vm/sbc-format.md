@@ -29,7 +29,7 @@ Each chunk is stored as follows.
 name                string
 arity               u8; 255 means @va
 slots               u8
-upvalue_count       u16
+upvalue_count       u8
 upvalues            repeated source:u8, index:u8
 code_word_count     u32
 code_words          repeated u32
@@ -40,5 +40,7 @@ Each chunk owns its code words in the image; `code_begin`, `code_end`, and a glo
 ## Validation
 
 The reader rejects invalid magic, unsupported constant/upvalue tags, truncated or trailing bytes, missing/out-of-range entry chunks, fixed arity greater than slots, invalid constant/chunk/register references, invalid capture references at each `CLOSURE`, and unknown opcodes.
+
+Chunk names must be nonempty and unique within a `CodeUnit`; they are assembly/debug symbols, while VM execution uses numeric chunk indices. Each chunk has at most 255 upvalues. `ir::UpvalueCount` is `std::uint8_t`; vector sizes are checked before narrowing. The runtime closure count field remains `size_t`.
 
 IR image errors become `InvalidImageError` when materialized by the VM.

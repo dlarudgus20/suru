@@ -8,6 +8,7 @@
 #include <ostream>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -17,11 +18,6 @@ namespace {
 void write_u8(std::ostream& out, std::uint8_t value) {
     out.put(static_cast<char>(value));
     if (!out) throw ImageError("failed to write binary image");
-}
-
-void write_u16(std::ostream& out, std::uint16_t value) {
-    write_u8(out, static_cast<std::uint8_t>(value));
-    write_u8(out, static_cast<std::uint8_t>(value >> 8U));
 }
 
 void write_u32(std::ostream& out, std::uint32_t value) {
@@ -54,11 +50,6 @@ public:
         const int ch = input_.get();
         if (ch == std::char_traits<char>::eof()) throw ImageError("unexpected end of binary image");
         return static_cast<std::uint8_t>(ch);
-    }
-
-    std::uint16_t u16() {
-        return static_cast<std::uint16_t>(u8())
-            | static_cast<std::uint16_t>(static_cast<std::uint16_t>(u8()) << 8U);
     }
 
     std::uint32_t u32() {
@@ -99,12 +90,15 @@ void validate(const CodeUnit& unit) {
         || unit.chunks.size() > std::numeric_limits<std::uint32_t>::max()) {
         throw ImageError("code unit is too large");
     }
+    std::unordered_set<std::string> names;
     for (const Chunk& chunk : unit.chunks) {
+        if (chunk.name.empty()) throw ImageError("empty chunk name");
+        if (!names.insert(chunk.name).second) throw ImageError("duplicate chunk name: " + chunk.name);
+        if (chunk.upvalue_infos.size() > max_upvalue_count) throw ImageError("too many upvalues");
         if (chunk.arity != 255 && chunk.arity > chunk.slots) {
             throw ImageError("chunk arity exceeds slots");
         }
-        if (chunk.upvalue_infos.size() > std::numeric_limits<std::uint16_t>::max()
-            || chunk.code.size() > std::numeric_limits<std::uint32_t>::max()) {
+        if (chunk.code.size() > std::numeric_limits<std::uint32_t>::max()) {
             throw ImageError("chunk is too large");
         }
         for (const UpvalueInfo info : chunk.upvalue_infos) {
@@ -247,7 +241,7 @@ void write_binary(std::ostream& out, const CodeUnit& unit) {
         write_string(out, chunk.name);
         write_u8(out, chunk.arity);
         write_u8(out, chunk.slots);
-        write_u16(out, static_cast<std::uint16_t>(chunk.upvalue_infos.size()));
+        write_u8(out, static_cast<UpvalueCount>(chunk.upvalue_infos.size()));
         for (const UpvalueInfo info : chunk.upvalue_infos) {
             write_u8(out, static_cast<std::uint8_t>(info.source));
             write_u8(out, info.index);
@@ -281,9 +275,9 @@ CodeUnit read_binary(std::istream& in) {
         chunk.name = rd.string();
         chunk.arity = rd.u8();
         chunk.slots = rd.u8();
-        const std::uint16_t upvalue_count = rd.u16();
+        const UpvalueCount upvalue_count = rd.u8();
         chunk.upvalue_infos.reserve(upvalue_count);
-        for (std::uint16_t j = 0; j < upvalue_count; ++j) {
+        for (std::size_t j = 0; j < upvalue_count; ++j) {
             const std::uint8_t source = rd.u8();
             if (source > static_cast<std::uint8_t>(UpvalueSource::Upvalue)) {
                 throw ImageError("invalid upvalue source");

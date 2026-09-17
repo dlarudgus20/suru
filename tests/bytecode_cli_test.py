@@ -17,7 +17,7 @@ class BytecodeCliTest(unittest.TestCase):
             result = subprocess.run([CLI, source_path], capture_output=True, text=True)
             self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
             if success:
-                emitted = subprocess.run([CLI, "-o", image_path, source_path], capture_output=True, text=True)
+                emitted = subprocess.run([CLI, "--sbc", "-o", image_path, source_path], capture_output=True, text=True)
                 self.assertEqual(emitted.returncode, 0, emitted.stderr)
                 self.assertGreater(len(image_path.read_bytes()), 4)
                 loaded = subprocess.run([CLI, image_path], capture_output=True, text=True)

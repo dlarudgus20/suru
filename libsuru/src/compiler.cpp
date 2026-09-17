@@ -91,6 +91,7 @@ private:
     const SemanticModel& semantic_;
     const FunctionInfo& info_;
     std::string name_;
+    std::uint32_t next_child_index_ {0};
     std::vector<suru::ir::Word> code_;
     std::uint16_t temp_top_ {0};
     std::uint16_t high_water_ {0};
@@ -104,7 +105,7 @@ public:
 
     suru::ir::CodeUnit run(const Ast& ast) {
         unit.chunks.emplace_back();
-        FunctionCompiler root(*this, ast.root.id, "main");
+        FunctionCompiler root(*this, ast.root.id, "<main>");
         unit.chunks[0] = root.compile(ast.root, 0, false);
         unit.entry_chunk = 0;
         return std::move(unit);
@@ -328,7 +329,7 @@ void FunctionCompiler::expression(const Expr& expr, std::uint8_t destination, Re
             expression(*node.object, object); load_string(key, node.name);
             emit(suru::ir::encode_abc(suru::ir::Op::GetIndex, destination, object, key)); reset(saved); regular_tail(destination, mode);
         } else if constexpr (std::is_same_v<T, FunctionExpr>) {
-            const auto child = child_function(*node.body, false, "lambda_" + std::to_string(node.body->id));
+            const auto child = child_function(*node.body, false, "lambda");
             emit(suru::ir::encode_abx(suru::ir::Op::Closure, destination, child)); regular_tail(destination, mode);
         } else if constexpr (std::is_same_v<T, ArrayExpr>) {
             emit(suru::ir::encode_abx(suru::ir::Op::NewArray, destination, 0, true));
@@ -426,6 +427,8 @@ void FunctionCompiler::expression_list_fixed(
 }
 
 std::uint32_t FunctionCompiler::child_function(const FunctionBody& body, bool implicit_self, std::string name) {
+    name += "@" + std::to_string(next_child_index_++);
+    if (name_ != "<main>") name = name_ + "::" + name;
     return owner_.compile_child(body, implicit_self, std::move(name));
 }
 
@@ -548,7 +551,7 @@ void FunctionCompiler::statement(const Stmt& stmt) {
         else if constexpr (std::is_same_v<T, GenericForStmt>) generic_for(stmt, node);
         else if constexpr (std::is_same_v<T, FunctionStmt>) {
             const std::uint16_t saved = temp_top_; const auto closure = allocate();
-            const auto child = child_function(*node.body, node.name.method.has_value(), node.name.path.back());
+            const auto child = child_function(*node.body, node.name.method.has_value(), node.name.method ? *node.name.method : node.name.path.back());
             emit(suru::ir::encode_abx(suru::ir::Op::Closure, closure, child));
             if (node.name.path.size() == 1 && !node.name.method) {
                 write_binding(semantic_.function_roots.at(stmt.id), closure);

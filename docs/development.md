@@ -3,7 +3,7 @@
 ## 개발 환경
 - 언어/표준: C++23
 - 빌드 시스템: CMake
-- 주요 타깃: `libsuru-ir`, `libsuru-vm`, `libsuru`, `suru`, `suru-bc`
+- 주요 타깃: `libsuru-ir`, `libsuru-vm`, `libsuru`, `suru`
 
 ## 자주 쓰는 명령
 - 구성: `cmake -S . -B build`

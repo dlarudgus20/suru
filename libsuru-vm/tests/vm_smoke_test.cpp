@@ -4,6 +4,8 @@
 #include "suru/vm/raised_error.hpp"
 
 #include <limits>
+#include "suru/ir/assembler.hpp"
+#include "suru/ir/image.hpp"
 
 #include <gtest/gtest.h>
 
@@ -33,6 +35,24 @@ std::uint32_t pack_abx(suru::vm::Op op, std::uint32_t a, std::uint32_t bx, bool 
         | ((i ? 1U : 0U) << 25U)
         | ((a & 0xFFU) << 17U)
         | (bx & 0x1FFFFU);
+}
+
+
+TEST(VmSmokeTest, RejectsInvalidImageBeforeClosureMaterialization) {
+    suru::vm::VM vm;
+    auto image = suru::ir::assemble(".chunk main 0 0\nRETURN 0 0\n.chunk child 0 0\nRETURN 0 0\n");
+    image.chunks[1].upvalue_infos.assign(255, {suru::ir::UpvalueSource::Local, 0});
+    image.entry_chunk = 1;
+    auto* maximum = vm.load_code_unit(image);
+    ASSERT_NE(maximum, nullptr);
+    EXPECT_EQ(maximum->len, 255U);
+    image.entry_chunk = 0;
+    image.chunks[1].upvalue_infos.push_back({suru::ir::UpvalueSource::Local, 0});
+    EXPECT_THROW(suru::ir::validate(image), suru::ir::ImageError);
+    EXPECT_THROW(static_cast<void>(vm.load_code_unit(image)), suru::vm::InvalidImageError);
+    image.chunks[1].upvalue_infos.clear();
+    image.chunks[1].name = "main";
+    EXPECT_THROW(static_cast<void>(vm.load_code_unit(image)), suru::vm::InvalidImageError);
 }
 
 } // namespace

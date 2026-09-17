@@ -17,22 +17,24 @@
 - `vm_vararg_test` (`libsuru-vm/tests/vm_vararg_test.cpp`)
   - vararg/multret, 지연·반복 prep, open range, upvalue 수명을 확인한다.
 - `source_cli_test` (`suru/tests/source_cli_test.py`)
-  - 실행/`--ast`/`--ir`, `.sbc`, batch stdin, 세 REPL을 확인한다.
-- `suru_bc_upvalue_test` (`tests/upvalue.sura`)
+  - 입력 형식/확장자 우선순위, 실행/AST/IR/SBC/disassembly, batch stdin, REPL 허용·거부와 여러 줄 문자열 복구를 확인한다.
+- `bytecode_cli_regression_test` (`tests/bytecode_cli_test.py`)
+  - 통합 CLI의 assembly 실행과 SBC 저장·재실행 회귀를 확인한다.
+- `suru_bytecode_upvalue_test` (`tests/upvalue.sura`)
   - upvalue 캡처 및 `GETUPVAL`/`SETUPVAL` 실행 경로를 확인한다.
-- `suru_bc_div_test` (`tests/div.sura`)
+- `suru_bytecode_div_test` (`tests/div.sura`)
   - 표준 함수 `div(a, b)`의 다중 반환(몫/나머지) 처리를 확인한다.
-- `suru_bc_concat_len_test` (`tests/concat_len.sura`)
+- `suru_bytecode_concat_len_test` (`tests/concat_len.sura`)
   - `CONCAT`, `LEN` 동작과 문자열/숫자/불리언 조합을 확인한다.
-- `suru_bc_array_test` (`tests/array.sura`)
+- `suru_bytecode_array_test` (`tests/array.sura`)
   - 배열 생성/읽기/쓰기 및 음수 인덱스 동작을 확인한다.
-- `suru_bc_immediate_test` (`tests/immediate.sura`)
+- `suru_bytecode_immediate_test` (`tests/immediate.sura`)
   - immediate 규약(`RI[C]`, `RI[Bx]`)과 관련 opcode 경로를 확인한다.
-- `suru_bc_global_index_test` (`tests/global_index.sura`)
+- `suru_bytecode_global_index_test` (`tests/global_index.sura`)
   - `GETGLOBAL`/`SETGLOBAL` 및 immediate `GETINDEX`/`SETINDEX` 경로를 확인한다.
-- `suru_bc_emit_sbc_test`
-  - `suru-bc -o`로 `.sbc` 파일 저장 경로를 확인한다.
-- `suru_bc_run_sbc_test`
+- `suru_bytecode_emit_sbc_test`
+  - `suru --sbc -o`로 `.sbc` 파일 저장 경로를 확인한다.
+- `suru_bytecode_run_sbc_test`
   - `.sbc` 입력 자동 감지 및 실행 경로를 확인한다.
 
 ## 실행 명령
@@ -40,7 +42,7 @@
   - `ctest --test-dir build -C Debug --output-on-failure`
 - 특정 테스트:
   - `ctest --test-dir build -C Debug -R front_smoke_test --output-on-failure`
-  - `ctest --test-dir build -C Debug -R suru_bc_div_test --output-on-failure`
+  - `ctest --test-dir build -C Debug -R suru_bytecode_div_test --output-on-failure`
 
 ## 테스트 추가 원칙
 - 기능 변경 시 최소 1개 테스트를 같이 수정/추가한다.

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "suru/ir/assembler.hpp"
+#include "suru/ir/builder.hpp"
 #include "suru/ir/disassembler.hpp"
 #include "suru/ir/error.hpp"
 #include "suru/ir/image.hpp"
@@ -126,6 +127,56 @@ TEST(Ir, AcceptsBothAssemblyCommentStyles) {
     );
     ASSERT_EQ(unit.chunks.size(), 1U);
     EXPECT_EQ(unit.chunks[0].code.size(), 1U);
+}
+
+
+TEST(Ir, RequiresNonemptyUniqueChunkNamesAtEveryImageBoundary) {
+    for (const std::string bad_name : {"", "main"}) {
+        auto unit = suru::ir::assemble(".chunk main 0 0\nRETURN 0 0\n.chunk child 0 0\nRETURN 0 0\n");
+        unit.chunks[1].name = bad_name;
+        EXPECT_THROW(suru::ir::validate(unit), suru::ir::ImageError);
+        std::ostringstream bytes;
+        EXPECT_THROW(suru::ir::write_binary(bytes, unit), suru::ir::ImageError);
+        EXPECT_TRUE(bytes.str().empty());
+        std::ostringstream assembly;
+        EXPECT_THROW(suru::ir::disassemble(assembly, unit), suru::ir::ImageError);
+        suru::ir::CodeUnitBuilder builder;
+        static_cast<void>(builder.add_chunk(unit.chunks[0]));
+        static_cast<void>(builder.add_chunk(unit.chunks[1]));
+        EXPECT_THROW(static_cast<void>(builder.finish(0)), suru::ir::ImageError);
+    }
+    // Invalid names also cannot enter through a hand-crafted SBC.
+    auto unit = suru::ir::assemble(".chunk main 0 0\nRETURN 0 0\n.chunk next 0 0\nRETURN 0 0\n");
+    std::ostringstream bytes;
+    suru::ir::write_binary(bytes, unit);
+    auto raw = bytes.str();
+    const auto position = raw.find("next");
+    ASSERT_NE(position, std::string::npos);
+    raw.replace(position, 4, "main");
+    std::istringstream invalid(raw);
+    EXPECT_THROW(static_cast<void>(suru::ir::read_binary(invalid)), suru::ir::ImageError);
+}
+
+TEST(Ir, StoresUpvalueCountAsOneByteAndRejectsOverflow) {
+    auto unit = suru::ir::assemble(".chunk main 0 0\nRETURN 0 0\n");
+    unit.chunks[0].upvalue_infos.assign(255, {suru::ir::UpvalueSource::Local, 0});
+    EXPECT_NO_THROW(suru::ir::validate(unit));
+    std::stringstream bytes(std::ios::in | std::ios::out | std::ios::binary);
+    suru::ir::write_binary(bytes, unit);
+    const auto raw = bytes.str();
+    // Header 16, name length 4 + name 4, arity/slots/count 3,
+    // captures 510, code count 4, one instruction 4.
+    ASSERT_EQ(raw.size(), 545U);
+    EXPECT_EQ(static_cast<unsigned char>(raw[26]), 255U);
+    bytes.seekg(0);
+    EXPECT_EQ(suru::ir::read_binary(bytes).chunks[0].upvalue_infos.size(), 255U);
+    unit.chunks[0].upvalue_infos.push_back({suru::ir::UpvalueSource::Local, 0});
+    EXPECT_THROW(suru::ir::validate(unit), suru::ir::ImageError);
+    std::ostringstream rejected;
+    EXPECT_THROW(suru::ir::write_binary(rejected, unit), suru::ir::ImageError);
+    suru::ir::CodeUnitBuilder builder;
+    static_cast<void>(builder.add_chunk(unit.chunks[0]));
+    EXPECT_THROW(static_cast<void>(builder.finish(0)), suru::ir::ImageError);
 }
 
 } // namespace
